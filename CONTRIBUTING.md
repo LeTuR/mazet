@@ -15,7 +15,9 @@ technical merits, and help newcomers find their footing.
 2. **Branch off `main`** (`git switch -c feat/my-change`). Push directly if you
    have write access, otherwise fork first.
 3. **Make the change, with tests.** A behaviour is asserted by running the
-   code, never by grepping the source for a string.
+   code, never by grepping the source for a string — the one exception being
+   [`tests/architecture_rules.rs`](tests/architecture_rules.rs), whose subject
+   is the source itself.
 4. **Run the gate** (below) and make it green.
 5. **Open a pull request** against `main` with a conventional-commit title.
 

@@ -19,11 +19,14 @@
 //! # What is extracted
 //!
 //! References come from comment- and string-stripped source, so every import
-//! shape is covered: `use` / `pub use`, brace groups (`use crate::{a, b}`),
-//! bare imports, multi-line statements, and fully-qualified paths in code
-//! (`crate::a::item(…)`). Both spellings of a crossing are read — `crate::a`
-//! from anywhere, and `super::a` from a `cli` submodule, which is how the
-//! siblings in `src/cli/` actually reach each other.
+//! shape is covered: `use` / `pub use`, brace groups (`use crate::{a, b}`,
+//! whose members are read whole so `crate::{cli::select}` names the submodule
+//! and not `cli`), bare imports, multi-line statements, and fully-qualified
+//! paths in code (`crate::a::item(…)`). Both spellings of a crossing are read
+//! — `crate::a`, and `super::a`, which resolves against the file's parent and
+//! is how the siblings in `src/cli/` actually reach each other. In a module
+//! the crate root declares, `super::` is the crate root, so it is read there
+//! too.
 //!
 //! A reference along a module's own chain — itself, an ancestor, a descendant
 //! — is not an architecture edge and is not recorded. `cli::login_cmd` reading
@@ -389,12 +392,19 @@ fn skip_block_comment(bytes: &[u8], mut i: usize, out: &mut Vec<u8>) -> usize {
     i
 }
 
-/// `"…"`, honouring backslash escapes.
+/// `"…"`, honouring backslash escapes. A backslash-continued line ends with
+/// an escaped newline, which is emitted like any other: a lost one would move
+/// every line number reported below it.
 fn skip_string(bytes: &[u8], mut i: usize, out: &mut Vec<u8>) -> usize {
     i += 1;
     while i < bytes.len() {
         match bytes[i] {
-            b'\\' => i += 2,
+            b'\\' => {
+                if bytes.get(i + 1) == Some(&b'\n') {
+                    out.push(b'\n');
+                }
+                i += 2;
+            }
             b'"' => return i + 1,
             b'\n' => {
                 out.push(b'\n');
@@ -479,79 +489,64 @@ fn read_ident(bytes: &[u8], i: &mut usize) -> String {
     String::from_utf8_lossy(&bytes[start..*i]).into_owned()
 }
 
-/// First path segments of a brace group (top level only):
-/// `{config::x, profile::y}` yields `config` and `profile`.
-fn brace_group_segments(bytes: &[u8], open: usize) -> Vec<String> {
-    let mut segments = Vec::new();
-    let mut depth = 0usize;
-    let mut expect_segment = false;
-    let mut i = open;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'{' => {
-                depth += 1;
-                expect_segment = depth == 1;
-                i += 1;
+/// The members of a brace group, each read as a whole path: `{a::b, c::{d}}`
+/// yields `a::b` and `c::d`. `i` enters on the `{` and leaves past the `}`.
+fn brace_group_paths(bytes: &[u8], i: &mut usize) -> Vec<String> {
+    let mut members = Vec::new();
+    *i += 1;
+    loop {
+        skip_whitespace(bytes, i);
+        match bytes.get(*i) {
+            None | Some(&b'}') => {
+                *i += 1;
+                return members;
             }
-            b'}' => {
-                depth -= 1;
-                if depth == 0 {
-                    break;
+            Some(&b',') => *i += 1,
+            _ => {
+                let before = *i;
+                members.extend(paths_at(bytes, i));
+                if *i == before {
+                    *i += 1;
                 }
-                i += 1;
             }
-            b',' => {
-                expect_segment |= depth == 1;
-                i += 1;
-            }
-            b if depth == 1 && expect_segment && !b.is_ascii_whitespace() => {
-                if is_ident_char(b) {
-                    segments.push(read_ident(bytes, &mut i));
-                } else {
-                    i += 1;
-                }
-                expect_segment = false;
-            }
-            _ => i += 1,
         }
     }
-    segments
 }
 
-/// The `::`-joined paths a prefix token names: a brace group's members, or the
-/// one path written after it, read to its end.
+/// The `::`-joined paths written at `i`: a brace group's members, or the one
+/// path written there, each read to its end.
 ///
 /// The whole path is read rather than its first segment or two, because
 /// [`resolve_module`] needs every prefix of it to find the module: written from
 /// `cli::which_cmd`, `super::login_cmd::LOGIN_EXAMPLES` is three segments deep
-/// and names `cli::login_cmd`, a sibling.
-fn paths_after(bytes: &[u8], from: usize) -> Vec<String> {
-    let mut i = from;
-    skip_whitespace(bytes, &mut i);
-    if bytes.get(i) == Some(&b'{') {
-        return brace_group_segments(bytes, i);
+/// and names `cli::login_cmd`, a sibling — and so does the same crossing spelt
+/// `crate::{cli::login_cmd::LOGIN_EXAMPLES}`.
+fn paths_at(bytes: &[u8], i: &mut usize) -> Vec<String> {
+    skip_whitespace(bytes, i);
+    if bytes.get(*i) == Some(&b'{') {
+        return brace_group_paths(bytes, i);
     }
-    if !bytes.get(i).is_some_and(|&b| is_ident_char(b)) {
+    if !bytes.get(*i).is_some_and(|&b| is_ident_char(b)) {
         return Vec::new();
     }
-    let mut path = read_ident(bytes, &mut i);
+    let mut path = read_ident(bytes, i);
     loop {
-        if bytes.get(i) != Some(&b':') || bytes.get(i + 1) != Some(&b':') {
+        if bytes.get(*i) != Some(&b':') || bytes.get(*i + 1) != Some(&b':') {
             return vec![path];
         }
-        i += 2;
-        skip_whitespace(bytes, &mut i);
-        if bytes.get(i) == Some(&b'{') {
-            return brace_group_segments(bytes, i)
+        *i += 2;
+        skip_whitespace(bytes, i);
+        if bytes.get(*i) == Some(&b'{') {
+            return brace_group_paths(bytes, i)
                 .into_iter()
                 .map(|member| format!("{path}::{member}"))
                 .collect();
         }
         // `::<T>` and the like: the path ended at the last identifier.
-        if !bytes.get(i).is_some_and(|&b| is_ident_char(b)) {
+        if !bytes.get(*i).is_some_and(|&b| is_ident_char(b)) {
             return vec![path];
         }
-        path = format!("{path}::{}", read_ident(bytes, &mut i));
+        path = format!("{path}::{}", read_ident(bytes, i));
     }
 }
 
@@ -584,76 +579,19 @@ fn is_path_tail(bytes: &[u8], pos: usize) -> bool {
     is_ident_char(prev) || prev == b':' || prev == b'$'
 }
 
-/// The byte ranges of inline `mod <name> { … }` blocks in stripped source.
-///
-/// This crate has none — every module is a file, and its tests live under
-/// `tests/` — but a `super::` inside one would mean the enclosing inline
-/// module rather than the file's parent, so those sites are skipped rather
-/// than resolved wrongly.
-fn inline_mod_spans(stripped: &str) -> Vec<(usize, usize)> {
-    let bytes = stripped.as_bytes();
-    let mut spans = Vec::new();
-    let mut search = 0;
-    while let Some(found) = stripped[search..].find("mod") {
-        let start = search + found;
-        search = start + 3;
-        let before_ok = start == 0 || !is_ident_char(bytes[start - 1]);
-        if !before_ok || !bytes.get(start + 3).is_some_and(u8::is_ascii_whitespace) {
-            continue;
-        }
-        // Skip the module's name, then see whether a body follows. `mod x;` is
-        // a declaration of a file module and opens no block.
-        let mut i = start + 3;
-        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
-            i += 1;
-        }
-        let _ = read_ident(bytes, &mut i);
-        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
-            i += 1;
-        }
-        if bytes.get(i) != Some(&b'{') {
-            continue;
-        }
-        let mut depth = 0usize;
-        let mut at = i;
-        while at < bytes.len() {
-            match bytes[at] {
-                b'{' => depth += 1,
-                b'}' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        break;
-                    }
-                }
-                _ => {}
-            }
-            at += 1;
-        }
-        spans.push((start, at.min(bytes.len())));
-        search = at;
-    }
-    spans
-}
-
 /// Every module reference in `stripped`, as seen from module `owner`.
 ///
-/// `crate::`/`mazet::` name a module absolutely; `super::` names one relative
-/// to `owner`'s parent, which is how the modules in `src/cli/` reach each
-/// other.
+/// `crate::` names a module absolutely; `super::` names one relative to
+/// `owner`'s parent — which is how the modules in `src/cli/` reach each other
+/// — or, in a module the crate root declares, the root itself.
 fn module_refs(stripped: &str, owner: &str) -> Vec<RefSite> {
     let bytes = stripped.as_bytes();
     let uses = use_spans(stripped);
-    let inline_mods = inline_mod_spans(stripped);
     let parent = owner.rsplit_once("::").map(|(head, _)| head.to_string());
     let mut refs = Vec::new();
 
-    for token in ["crate::", "mazet::", "super::"] {
+    for token in ["crate::", "super::"] {
         let relative = token == "super::";
-        // A `super::` in a crate-root module has no parent to resolve against;
-        // one in an inline `mod` block does not mean the file's parent.
-        if relative && parent.is_none() {
-            continue;
-        }
         let mut search = 0;
         while let Some(found) = stripped[search..].find(token) {
             let pos = search + found;
@@ -661,11 +599,9 @@ fn module_refs(stripped: &str, owner: &str) -> Vec<RefSite> {
             if is_path_tail(bytes, pos) {
                 continue;
             }
-            if relative && inline_mods.iter().any(|&(s, e)| pos >= s && pos < e) {
-                continue;
-            }
             let in_use = uses.iter().any(|&(s, e)| pos >= s && pos < e);
-            for path in paths_after(bytes, pos + token.len()) {
+            let mut after = pos + token.len();
+            for path in paths_at(bytes, &mut after) {
                 let absolute = match &parent {
                     Some(parent) if relative => format!("{parent}::{path}"),
                     _ => path,
@@ -749,58 +685,26 @@ fn format_violations(rules: &ModuleRules, violations: &[Violation]) -> String {
     msg
 }
 
-fn assert_module_clean(name: &str) {
-    let rules = MODULE_RULES
-        .iter()
-        .find(|r| r.name == name)
-        .unwrap_or_else(|| panic!("no MODULE_RULES entry for `{name}`"));
-    let violations = check_module(rules);
-    assert!(
-        violations.is_empty(),
-        "{}",
-        format_violations(rules, &violations)
-    );
-}
-
-/// `az` is the crate's one side-effect module, and it depends on nothing.
+/// Every module obeys its own entry.
 ///
-/// The direction matters: a module that holds credentials and starts processes
-/// must not also be able to read a config or derive a store path, or the code
-/// a reviewer has to audit stops being a file and becomes the crate.
+/// Driven by [`MODULE_RULES`] itself, so an entry is enforced the moment it is
+/// written rather than when its name is also added to a list here.
+///
+/// The crossings this holds: `az` reaches nothing, so the module that spawns
+/// children and writes secret material cannot read a `.mazet`, derive a store
+/// path or consult the registry; the parse-and-derive layer names neither `az`
+/// nor `exec`, so a committed file cannot grow a path that executes; and
+/// `cli::select`, the shared "which store?" answer every command takes, may
+/// not reach `az` while the four commands that declare it may.
 #[test]
-fn az_reaches_nothing() {
-    assert_module_clean("az");
-}
-
-/// Parsing a `.mazet`, layering it and deriving a store path never reaches the
-/// module that can execute something.
-#[test]
-fn the_parse_and_derive_layer_cannot_execute() {
-    for name in [
-        "config", "discover", "paths", "profile", "store", "resolve", "init", "explain", "hook",
-        "status",
-    ] {
-        assert_module_clean(name);
-    }
-}
-
-/// `login` and `exec` decide what `az` would be told; they do not tell it.
-#[test]
-fn the_planning_layer_is_isolated() {
-    for name in ["login", "exec"] {
-        assert_module_clean(name);
-    }
-}
-
-/// The command line, module by module. `cli::select` answers "which store?"
-/// for every command and may not reach `az`; the four commands that run
-/// something may.
-#[test]
-fn every_cli_module_is_isolated() {
+fn every_module_obeys_its_rules() {
     for rules in MODULE_RULES {
-        if rules.name == "cli" || rules.name.starts_with("cli::") {
-            assert_module_clean(rules.name);
-        }
+        let violations = check_module(rules);
+        assert!(
+            violations.is_empty(),
+            "{}",
+            format_violations(rules, &violations)
+        );
     }
 }
 

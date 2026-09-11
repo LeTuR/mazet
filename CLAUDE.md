@@ -49,8 +49,9 @@ updating both.
   Widening one is a decision — record it in `docs/ARCHITECTURE.md` in the same
   pull request.
 - **A behaviour is asserted by running the code**, never by grepping the source
-  for a string. Tests live under `tests/`, one file per surface; there are no
-  `#[cfg(test)]` blocks under `src/`.
+  for a string — the one exception being `tests/architecture_rules.rs`, whose
+  subject is the source itself. Tests live under `tests/`, one file per
+  surface; there are no `#[cfg(test)]` blocks under `src/`.
 - **A bug fix starts with a test that reproduces it** — failing before the fix,
   passing after.
 - **Comments explain why, never what.** No TODO, FIXME or HACK markers, and no

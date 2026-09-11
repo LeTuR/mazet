@@ -98,16 +98,21 @@ its own header.
 
 A behaviour is asserted by running the code. A test whose only evidence is that
 it greps the source for a string proves nothing — the text can be dead, and a
-behaviour-preserving refactor changes it.
+behaviour-preserving refactor changes it. The architecture test below is the
+one exception, and only because its subject *is* the source: what a module may
+reference, and what may appear anywhere under `src/`, are not behaviours a run
+can exhibit.
 
 ### The architecture test
 
 [`tests/architecture_rules.rs`](../tests/architecture_rules.rs) is an
 **allowlist**: every module under `src/` must have a `MODULE_RULES` entry (or
 sit in `EXEMPT`) naming the crate modules it may reference, and
-`every_module_is_governed` fails when one does not. Three more tests hold the
-rules an allowlist cannot express — `az` is the only module that starts a
-process, and nothing mutates this process's environment.
+`every_module_is_governed` fails when one does not, and
+`every_module_obeys_its_rules` reads every entry there is, so an entry is
+enforced from the moment it is written. Two more tests hold the rules an
+allowlist cannot express — `az` is the only module that starts a process, and
+nothing mutates this process's environment.
 
 Adding a module means adding its entry. Adding a dependency between two modules
 means widening an entry, and that is the decision the file exists to make

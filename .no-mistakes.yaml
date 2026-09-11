@@ -137,7 +137,8 @@ review:
         under tests/, one file per surface; there are no #[cfg(test)] blocks
         under src/, and the architecture test's super:: resolution assumes
         that. A behaviour is asserted by running the code, never by grepping
-        the source for a string.
+        the source for a string - tests/architecture_rules.rs is the one
+        exception, because its subject is the source itself.
 
         Comments explain why, never what. A stale comment is worse than none,
         so comments around touched code are fixed or deleted. No TODO, FIXME
