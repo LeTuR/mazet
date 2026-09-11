@@ -18,8 +18,9 @@ use serde_json::json;
 use super::{select::SelectionArgs, CommandError, CommandOutput, Context};
 use crate::{
     az::{Az, Streams},
+    explain,
     profile::{ProfileName, Registry},
-    status::{self, Account, SHOW_ARGS},
+    status::{Account, SHOW_ARGS},
 };
 
 /// The worked examples on `mazet status --help`.
@@ -28,14 +29,16 @@ Examples:
   mazet status                     the store this directory is bound to
   mazet status --env prod          the prod environment's own store
   mazet status --profile client-a  a registered profile's store
-  mazet status --all               every store on this machine, at once
+  mazet status --all               every profile and derived store, at once
   mazet status --all --json        the same, for a script or an agent
 
 For each store: the directory, whether a login is present, and the tenant,
 subscription, cloud and identity that `az account show` reports inside it.
 
 A store that has never been logged into is reported as such, not as a failure.
---all skips az entirely for those, so it stays fast with many profiles.";
+--all skips az entirely for those, so it stays fast with many profiles. It lists
+the registered profiles and the derived stores under mazet's data directory; a
+tree that keeps its store inside its own .mazet/ is only reachable from there.";
 
 /// `mazet status`.
 #[derive(Debug, Args)]
@@ -88,8 +91,12 @@ pub fn run(args: &StatusArgs, ctx: &Context) -> Result<CommandOutput, CommandErr
     Ok(render(&reports, args.all, az.is_none()))
 }
 
-/// Every store this machine has: the registered profiles, and the derived
-/// stores a `.mazet` resolved to at some point.
+/// The registered profiles, and the derived stores a `.mazet` resolved to at
+/// some point.
+///
+/// Not every store on the machine: a tree configured with `store = "local"`
+/// keeps its own inside its `.mazet/`, and nothing under the data root records
+/// that it exists. Those are reported by running `mazet status` in the tree.
 fn every_store(ctx: &Context) -> Result<Vec<Probe>, CommandError> {
     let registry = Registry::load(&ctx.paths.registry_file()).map_err(CommandError::from_error)?;
     let mut probes = Vec::new();
@@ -147,7 +154,7 @@ fn probe_all(az: Option<&Az>, probes: &[Probe]) -> Vec<Report> {
 
 fn probe_one(az: Option<&Az>, probe: &Probe) -> Report {
     let exists = probe.store.is_dir();
-    let logged_in = status::holds_account(&probe.store);
+    let logged_in = explain::holds_account(&probe.store);
     let mut account = None;
     let mut note = None;
 
@@ -155,13 +162,11 @@ fn probe_one(az: Option<&Az>, probe: &Probe) -> Report {
         // Told apart on purpose: `az logout` leaves the file behind with an
         // empty account list, so "never used" and "logged out" look identical
         // to anything that only checks whether it is there.
-        note = Some(
-            if probe.store.join(crate::explain::LOGIN_MARKER).is_file() {
-                "logged out — az cleared the account from this store".to_string()
-            } else {
-                "no login yet — nothing has ever logged in here".to_string()
-            },
-        );
+        note = Some(if explain::has_login(&probe.store) {
+            "logged out — az cleared the account from this store".to_string()
+        } else {
+            "no login yet — nothing has ever logged in here".to_string()
+        });
     } else {
         match az {
             None => note = Some("az is not on PATH, so the login could not be read".to_string()),
@@ -267,7 +272,7 @@ fn render(reports: &[Report], all: bool, az_missing: bool) -> CommandOutput {
         human.push('\n');
     }
     if reports.is_empty() {
-        human.push_str("No stores on this machine yet.\n\nCreate one:\n  mazet init\n  mazet profile add <name>\n");
+        human.push_str("No profile or derived stores yet.\n\nCreate one:\n  mazet init\n  mazet profile add <name>\n");
     }
     if az_missing && reports.iter().any(|report| report.logged_in) {
         human.push_str(
@@ -290,7 +295,9 @@ fn render(reports: &[Report], all: bool, az_missing: bool) -> CommandOutput {
     ]);
 
     if all {
-        out.empty("No stores on this machine yet. Run `mazet init` or `mazet profile add <name>`.")
+        out.empty(
+            "No profile or derived stores yet. Run `mazet init` or `mazet profile add <name>`.",
+        )
     } else {
         out
     }

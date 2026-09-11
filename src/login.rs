@@ -218,6 +218,13 @@ pub enum LoginError {
         /// The mode that needs it.
         mode: &'static str,
     },
+    /// A device-code login with a username. `az` refuses the pair.
+    #[error(
+        "a device-code login cannot log in as a named user: whoever types the code \
+         is who the store becomes.\n  \
+         Drop --username, or drop the device code and log in as that user."
+    )]
+    UsernameWithDeviceCode,
     /// A user/password login with no user.
     #[error(
         "a password was offered but nothing names the user to log in as.\n  \
@@ -225,6 +232,15 @@ pub enum LoginError {
          browser login and ignores the password."
     )]
     UsernameRequired,
+    /// `--skip-subscription-discovery` with a managed identity: `az` requires
+    /// a tenant for the flag and refuses one with `--identity`, so the pair
+    /// can never be satisfied.
+    #[error(
+        "--skip-subscription-discovery requires a tenant, and a managed-identity login \
+         cannot carry one: az refuses --tenant alongside --identity.\n  \
+         Drop --skip-subscription-discovery, or log in as a user or a service principal."
+    )]
+    SkipDiscoveryWithManagedIdentity,
     /// `--skip-subscription-discovery` without a tenant: `az`'s own rule.
     #[error(
         "--skip-subscription-discovery requires a tenant, because az has nowhere \
@@ -361,6 +377,13 @@ pub fn choose_mode(
         }
     };
 
+    // `az` refuses the pair outright (`if any([password, service_principal,
+    // username, identity]) and use_device_code: raise CLIError`), and taking
+    // the username silently would log the operator in as whoever typed the
+    // code instead.
+    if mode == Mode::DeviceCode && options.username.is_some() {
+        return Err(LoginError::UsernameWithDeviceCode);
+    }
     if options.use_cert_sn_issuer && mode != Mode::ServicePrincipalCertificate {
         return Err(LoginError::CertSnIssuerWithoutCertificate {
             mode: mode.as_str(),
@@ -397,13 +420,28 @@ pub fn plan(
         });
     }
 
-    let tenant = options.tenant.clone().or_else(|| effective.tenant.clone());
-    let subscription = options
-        .subscription
-        .clone()
-        .or_else(|| effective.subscription.clone());
+    // `az login --identity` refuses to run alongside a tenant at all:
+    //
+    //     if any([password, service_principal, tenant]) and identity:
+    //         raise CLIError("usage error: '--identity' is not applicable
+    //                         with other arguments")
+    //
+    // (azure-cli 2.90.0, profile/custom.py). A managed identity is the host's,
+    // and its tenant comes with it — so a `.mazet` that names one is honoured
+    // everywhere else and simply does not reach this login. Decided once,
+    // here, because every rule below that asks "is there a tenant?" is asking
+    // about the login `az` will actually be given.
+    let tenant = if mode.is_managed_identity() {
+        None
+    } else {
+        effective_tenant(effective, options)
+    };
+    let subscription = effective_subscription(effective, options);
 
     if options.skip_subscription_discovery {
+        if mode.is_managed_identity() {
+            return Err(LoginError::SkipDiscoveryWithManagedIdentity);
+        }
         if tenant.is_none() {
             return Err(LoginError::SkipDiscoveryNeedsTenant);
         }
@@ -470,17 +508,7 @@ pub fn plan(
         }
     }
 
-    // `az login --identity` refuses to run alongside a tenant at all:
-    //
-    //     if any([password, service_principal, tenant]) and identity:
-    //         raise CLIError("usage error: '--identity' is not applicable
-    //                         with other arguments")
-    //
-    // (azure-cli 2.90.0, profile/custom.py). A managed identity is the host's,
-    // and its tenant comes with it — so a `.mazet` that names one is honoured
-    // everywhere else and simply does not reach this login.
     match &tenant {
-        _ if mode.is_managed_identity() => {}
         Some(value) => pair(&mut login, "--tenant", value.as_str()),
         // `az login --service-principal` refuses to run without one, so mazet
         // says so before spawning anything.
@@ -536,12 +564,20 @@ pub fn plan(
     Ok(Plan { mode, steps })
 }
 
-/// The `az logout` call for a store.
-pub fn logout_step() -> Step {
-    Step {
-        kind: StepKind::Login,
-        args: vec!["logout".to_string()],
-    }
+/// The tenant this login is for: the flag's, else the config's.
+///
+/// The report and the argv are built from the same answer, so a `--tenant`
+/// override cannot reach `az` while the report names the config's value.
+pub fn effective_tenant(effective: &Effective, options: &Options) -> Option<Tenant> {
+    options.tenant.clone().or_else(|| effective.tenant.clone())
+}
+
+/// The subscription this login is for: the flag's, else the config's.
+pub fn effective_subscription(effective: &Effective, options: &Options) -> Option<Subscription> {
+    options
+        .subscription
+        .clone()
+        .or_else(|| effective.subscription.clone())
 }
 
 fn pair(args: &mut Vec<String>, flag: &str, value: &str) {

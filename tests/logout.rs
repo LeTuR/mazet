@@ -47,8 +47,9 @@ fn logging_out_clears_that_store_and_says_so() {
     // with an empty account list rather than removing it, so the file being
     // there is not the question — what is in it is.
     let store = std::path::PathBuf::from(json["store"].as_str().expect("a store"));
-    assert!(
-        !sandbox.accounts_in(&store),
+    assert_eq!(
+        sandbox.accounts_in(&store),
+        0,
         "the account is still in the store"
     );
 }
@@ -110,6 +111,42 @@ fn a_store_that_was_never_logged_into_is_not_a_failure() {
 }
 
 #[test]
+fn a_store_az_merely_touched_holds_no_account() {
+    let sandbox = Sandbox::new();
+    let tree = sandbox.subdir("tree");
+    sandbox.flat(&tree, &format!("tenant = \"{TENANT}\"\n"));
+
+    let logout = |sandbox: &Sandbox| -> serde_json::Value {
+        let out = sandbox
+            .mazet_stubbed(&tree)
+            .args(["logout", "--json"])
+            .output()
+            .expect("run mazet logout");
+        let text = String::from_utf8_lossy(&out.stdout).into_owned();
+        assert!(out.status.success(), "{text}");
+        serde_json::from_str(&text).expect("JSON")
+    };
+
+    let store = std::path::PathBuf::from(
+        logout(&sandbox)["store"]
+            .as_str()
+            .expect("a store")
+            .to_owned(),
+    );
+
+    // az writes azureProfile.json at the START of every command it runs, so a
+    // store where only `az cloud set` succeeded holds an installation id and
+    // no account list at all. `az logout` there exits non-zero with "There are
+    // no active accounts.".
+    sandbox.plant_profile(&store, r#"{"installationId":"stub"}"#);
+
+    let json = logout(&sandbox);
+    assert_eq!(json["had_login"], false);
+    assert_eq!(json["cleared"], false);
+    assert!(!sandbox.ran("logout"), "az logout should not have been run");
+}
+
+#[test]
 fn logging_out_of_one_profile_leaves_the_others_logged_in() {
     let sandbox = Sandbox::new();
     let tree = sandbox.tree();
@@ -130,9 +167,10 @@ fn logging_out_of_one_profile_leaves_the_others_logged_in() {
         String::from_utf8_lossy(&out.stdout)
     );
 
-    assert!(!sandbox.accounts_in(&profile_store(&sandbox, "client-a")));
-    assert!(
+    assert_eq!(sandbox.accounts_in(&profile_store(&sandbox, "client-a")), 0);
+    assert_eq!(
         sandbox.accounts_in(&profile_store(&sandbox, "client-b")),
+        1,
         "the other profile's login was cleared too"
     );
 }

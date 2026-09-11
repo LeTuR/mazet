@@ -92,8 +92,10 @@ pub fn ensure_dir(path: &Path) -> Result<(), StoreError> {
             // above them, so two commands creating two *different* stores at
             // the same time race over `stores/` — which is the ordinary case
             // for a tool whose whole point is running several identities at
-            // once. Whoever created it also made it private.
-            Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists => {}
+            // once. The mode is set here too: the winner's `create_dir` uses
+            // `0o777 & ~umask`, and a winner killed before its own
+            // `set_private` would leave the directory world-readable forever.
+            Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists => set_private(dir)?,
             Err(source) => return Err(io(dir)(source)),
         }
     }

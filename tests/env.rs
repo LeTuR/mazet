@@ -25,8 +25,9 @@ fn the_posix_form_is_what_a_pipe_gets() {
     // Down a pipe, and still shell code: this output is `eval`ed, so TOON
     // there would be something no shell can run.
     let text = env_output(&sandbox, &tree, &[]);
-    assert!(text.starts_with("export AZURE_CONFIG_DIR='"), "{text}");
-    assert!(text.trim_end().ends_with('\''), "{text}");
+    let first = text.lines().next().expect("a first line");
+    assert!(first.starts_with("export AZURE_CONFIG_DIR='"), "{text}");
+    assert!(first.ends_with('\''), "{text}");
 }
 
 #[test]
@@ -47,6 +48,26 @@ fn the_identifiers_match_the_selected_environment() {
         text.contains(&format!("export ARM_SUBSCRIPTION_ID='{SUBSCRIPTION}'")),
         "{text}"
     );
+}
+
+#[test]
+fn an_identifier_the_config_does_not_name_is_unset_rather_than_left_standing() {
+    let sandbox = Sandbox::new();
+    let tree = sandbox.subdir("tree");
+    sandbox.flat(&tree, &format!("tenant = \"{TENANT}\"\n"));
+
+    // This is evaluated into a shell that may already hold another store's
+    // ARM_SUBSCRIPTION_ID, and azurerm prefers the variable over the store.
+    let text = env_output(&sandbox, &tree, &[]);
+    assert!(text.contains("unset ARM_SUBSCRIPTION_ID"), "{text}");
+    assert!(
+        text.contains(&format!("export ARM_TENANT_ID='{TENANT}'")),
+        "{text}"
+    );
+
+    let json: serde_json::Value =
+        serde_json::from_str(&env_output(&sandbox, &tree, &["--json"])).expect("JSON");
+    assert_eq!(json["unset"], serde_json::json!(["ARM_SUBSCRIPTION_ID"]));
 }
 
 #[test]

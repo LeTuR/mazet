@@ -30,7 +30,9 @@ Examples:
 
 The assignments are AZURE_CONFIG_DIR, and ARM_TENANT_ID and ARM_SUBSCRIPTION_ID
 when the selected environment names them — the same set `mazet exec` gives a
-child, so a shell you eval this into behaves exactly like one.
+child, so a shell you eval this into behaves exactly like one. What it does not
+name is UNSET, so an identifier left over from another store cannot outlive the
+switch.
 
 This changes the shell you run it in and nothing else. To have every shell
 follow the directory automatically, install the hook instead:
@@ -78,20 +80,37 @@ pub fn run(args: &EnvArgs, ctx: &Context) -> Result<CommandOutput, CommandError>
     target.ensure()?;
 
     let shell = args.shell.map(Shell::from).unwrap_or(Shell::Bash);
-    let variables: Vec<(String, String)> = exec::environment(&target.store, &target.effective)
-        .into_iter()
-        .map(|(key, value)| (key, value.to_string_lossy().into_owned()))
-        .collect();
+    let variables: Vec<(String, Option<String>)> =
+        exec::environment(&target.store, &target.effective)
+            .into_iter()
+            .map(|(key, value)| (key, value.map(|value| value.to_string_lossy().into_owned())))
+            .collect();
 
+    // A variable the config does not name is UNSET rather than skipped: the
+    // shell being evaluated into may already hold another store's
+    // ARM_SUBSCRIPTION_ID, and leaving that standing would point terraform at
+    // a subscription this store has nothing to do with.
     let script = variables
         .iter()
-        .map(|(key, value)| assignment(shell, key, value))
+        .map(|(key, value)| match value {
+            Some(value) => assignment(shell, key, value),
+            None => removal(shell, key),
+        })
         .collect::<Vec<_>>()
         .join("\n");
 
     let map: serde_json::Map<String, serde_json::Value> = variables
         .iter()
-        .map(|(key, value)| (key.clone(), value.clone().into()))
+        .filter_map(|(key, value)| {
+            value
+                .as_ref()
+                .map(|value| (key.clone(), value.clone().into()))
+        })
+        .collect();
+    let unset: Vec<&str> = variables
+        .iter()
+        .filter(|(_, value)| value.is_none())
+        .map(|(key, _)| key.as_str())
         .collect();
 
     Ok(CommandOutput::new(
@@ -102,6 +121,7 @@ pub fn run(args: &EnvArgs, ctx: &Context) -> Result<CommandOutput, CommandError>
             "environment": target.env(),
             "shell": shell.as_str(),
             "variables": map,
+            "unset": unset,
             "script": script,
         }),
         script,
@@ -124,6 +144,15 @@ fn assignment(shell: Shell, key: &str, value: &str) -> String {
         Shell::Bash | Shell::Zsh => format!("export {key}='{}'", value.replace('\'', r"'\''")),
         Shell::Fish => format!("set -gx {key} '{}'", value.replace('\'', r"\'")),
         Shell::PowerShell => format!("$env:{key} = \"{}\"", value.replace('"', "`\"")),
+    }
+}
+
+/// The statement that takes a variable away, in that shell's syntax.
+fn removal(shell: Shell, key: &str) -> String {
+    match shell {
+        Shell::Bash | Shell::Zsh => format!("unset {key}"),
+        Shell::Fish => format!("set -e {key}"),
+        Shell::PowerShell => format!("Remove-Item Env:{key} -ErrorAction SilentlyContinue"),
     }
 }
 

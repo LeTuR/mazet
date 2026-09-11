@@ -9,8 +9,8 @@
 //! wrong-subscription apply this crate exists to prevent.
 //!
 //! Nothing here spawns anything and nothing here mutates this process's own
-//! environment: it returns the variables to **add to a child**, and
-//! [`crate::az::exec`] is what puts them there.
+//! environment: it returns the variables a child is to be **given, or stripped
+//! of**, and [`crate::az::exec`] is what applies them.
 
 use std::{ffi::OsString, path::Path};
 
@@ -21,32 +21,40 @@ pub const ARM_SUBSCRIPTION_ID: &str = "ARM_SUBSCRIPTION_ID";
 /// The tenant the Terraform `azurerm` provider authenticates in.
 pub const ARM_TENANT_ID: &str = "ARM_TENANT_ID";
 
-/// The variables to add to a child run against `store`.
+/// What a child run against `store` gets: `Some(value)` to set, `None` to
+/// REMOVE from whatever it inherited.
 ///
-/// `AZURE_CONFIG_DIR` is always set. The two `ARM_` variables are set only
-/// when the selected environment actually names them, so a config that names
-/// neither leaves whatever the caller's shell had alone.
+/// `AZURE_CONFIG_DIR` is always set. The two `ARM_` variables are set when the
+/// selected environment names them, and **cleared when it does not** — a
+/// variable the caller's shell happens to hold is the wrong-subscription apply
+/// this crate exists to prevent, and `eval "$(mazet env --env prod)"` in the
+/// same shell is the ordinary way to end up holding one.
 ///
 /// **`ARM_SUBSCRIPTION_ID` is set only for the id spelling.** A `.mazet` may
 /// name a subscription by display name, `azurerm` takes only a GUID there, and
-/// exporting a name would fail a `terraform plan` with a parse error. Left
-/// unset, the provider falls back to the store's active subscription — which
+/// exporting a name would fail a `terraform plan` with a parse error. Cleared,
+/// the provider falls back to the store's active subscription — which
 /// `mazet login` already selected from that same name.
-pub fn environment(store: &Path, effective: &Effective) -> Vec<(String, OsString)> {
-    let mut env = vec![(
-        AZURE_CONFIG_DIR.to_string(),
-        store.as_os_str().to_os_string(),
-    )];
-    if let Some(subscription) = &effective.subscription {
-        if subscription.is_guid() {
-            env.push((
-                ARM_SUBSCRIPTION_ID.to_string(),
-                OsString::from(subscription.as_str()),
-            ));
-        }
-    }
-    if let Some(tenant) = &effective.tenant {
-        env.push((ARM_TENANT_ID.to_string(), OsString::from(tenant.as_str())));
-    }
-    env
+pub fn environment(store: &Path, effective: &Effective) -> Vec<(String, Option<OsString>)> {
+    vec![
+        (
+            AZURE_CONFIG_DIR.to_string(),
+            Some(store.as_os_str().to_os_string()),
+        ),
+        (
+            ARM_SUBSCRIPTION_ID.to_string(),
+            effective
+                .subscription
+                .as_ref()
+                .filter(|subscription| subscription.is_guid())
+                .map(|subscription| OsString::from(subscription.as_str())),
+        ),
+        (
+            ARM_TENANT_ID.to_string(),
+            effective
+                .tenant
+                .as_ref()
+                .map(|tenant| OsString::from(tenant.as_str())),
+        ),
+    ]
 }

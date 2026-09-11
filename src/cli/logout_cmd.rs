@@ -6,7 +6,7 @@ use serde_json::json;
 use super::{select::SelectionArgs, CommandError, CommandOutput, Context};
 use crate::{
     az::{Az, Streams},
-    status,
+    explain,
 };
 
 /// The worked examples on `mazet logout --help`.
@@ -35,7 +35,7 @@ pub struct LogoutArgs {
 /// Run `mazet logout`.
 pub fn run(args: &LogoutArgs, ctx: &Context) -> Result<CommandOutput, CommandError> {
     let target = args.selection.resolve(ctx)?;
-    let had_login = status::holds_account(&target.store);
+    let had_login = explain::holds_account(&target.store);
 
     let cleared = if had_login {
         let az = Az::discover().map_err(CommandError::from_error)?;

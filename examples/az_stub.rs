@@ -7,10 +7,12 @@
 //! network, or a credential anywhere near it.
 //!
 //! It is also a believable `az` in the small: `login` writes an
-//! `azureProfile.json` into `AZURE_CONFIG_DIR`, `logout` removes it, and
-//! `account show` prints it back. That is the same file `mazet` uses to decide
-//! whether a store holds a login, so `login`, `logout` and `status` can be
-//! tested end to end against each other.
+//! `azureProfile.json` into `AZURE_CONFIG_DIR`, `logout` empties its account
+//! list the way `Profile.logout` does, and `account show` prints it back. That
+//! file is written the way the real one is — UTF-8 with a BOM, because
+//! azure-cli opens it as `utf-8-sig` — since it is what `mazet` reads to decide
+//! whether a store holds a login, and a stub that omitted the BOM would let a
+//! parser that chokes on it pass.
 //!
 //! Knobs, all through the environment:
 //!
@@ -81,7 +83,7 @@ fn act(argv: &[String], store: &Path) {
                 )
             });
             let _ = std::fs::create_dir_all(store);
-            let _ = std::fs::write(profile_file(store), wrap(&account));
+            write_profile(store, &wrap(&account));
         }
         // As az does it: `Profile.logout` writes back the subscriptions that
         // are left. It does NOT remove the file, and a second logout against
@@ -91,7 +93,7 @@ fn act(argv: &[String], store: &Path) {
                 eprintln!("ERROR: There are no active accounts.");
                 std::process::exit(1);
             }
-            let _ = std::fs::write(profile_file(store), r#"{"subscriptions":[]}"#);
+            write_profile(store, r#"{"installationId":"stub","subscriptions":[]}"#);
         }
         ["cloud", "set", "-n", name] => {
             let _ = std::fs::create_dir_all(store);
@@ -111,12 +113,19 @@ fn act(argv: &[String], store: &Path) {
     }
 }
 
+/// Write `azureProfile.json` the way az does: UTF-8 with a BOM, because the
+/// ACCOUNT session it keeps there is opened as `utf-8-sig`.
+fn write_profile(store: &Path, body: &str) {
+    let _ = std::fs::write(profile_file(store), format!("\u{feff}{body}"));
+}
+
 /// The account list az keeps in `azureProfile.json`.
 fn accounts(store: &Path) -> Vec<String> {
     let Ok(text) = std::fs::read_to_string(profile_file(store)) else {
         return Vec::new();
     };
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(text.trim_start_matches('\u{feff}'))
+    else {
         return Vec::new();
     };
     value["subscriptions"]

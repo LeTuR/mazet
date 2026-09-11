@@ -30,7 +30,6 @@ Examples:
   mazet login --method managed-identity               the host's system-assigned identity
   mazet login --method managed-identity --client-id X a user-assigned one
   mazet login --allow-no-subscriptions                a tenant with none, for `az ad`
-  mazet login --dry-run                               print the az calls and run nothing
 
 Secrets never come from a .mazet. They come from the environment, and mazet
 hands az a FILE PATH rather than the value, so nothing sensitive appears in the
@@ -101,10 +100,6 @@ pub struct LoginArgs {
     /// Use Subject Name + Issuer authentication, for certificates that roll.
     #[arg(long)]
     pub use_cert_sn_issuer: bool,
-
-    /// Print the az calls this would make, and run none of them.
-    #[arg(long)]
-    pub dry_run: bool,
 }
 
 fn parse_method(value: &str) -> Result<Method, String> {
@@ -172,38 +167,25 @@ pub fn run(args: &LoginArgs, ctx: &Context) -> Result<CommandOutput, CommandErro
     .map_err(usage)?;
 
     // The store has to exist before a credential can be written into it, so
-    // this is the first thing a real run does.
-    if !args.dry_run {
-        target.ensure()?;
-    }
+    // this is the first thing a run does.
+    target.ensure()?;
 
-    // Exactly one credential is materialised, and only for a real run: a dry
-    // run never writes a secret to disk, and renders the argument as the name
-    // of the variable that would have filled it.
+    // Exactly one credential is materialised: the one this mode needs.
     let kind = mode.credential();
     let source = kind.and_then(az::source_of);
-    let credential = match (kind, args.dry_run) {
-        (Some(kind), false) => credentials.take(kind).map_err(CommandError::from_error)?,
-        _ => None,
+    let credential = match kind {
+        Some(kind) => credentials.take(kind).map_err(CommandError::from_error)?,
+        None => None,
     };
-    let placeholder = source.map(|var| format!("<{var}>"));
-    let token = credential
-        .as_ref()
-        .map(|c| c.token())
-        .or(placeholder.as_deref());
 
     let plan = login::plan(
         &target.effective,
         target.declared_cloud,
         &options,
         mode,
-        token,
+        credential.as_ref().map(|c| c.token()),
     )
     .map_err(usage)?;
-
-    if args.dry_run {
-        return Ok(render_dry_run(&target, &plan, source));
-    }
 
     let az = Az::discover().map_err(CommandError::from_error)?;
     for step in &plan.steps {
@@ -215,7 +197,7 @@ pub fn run(args: &LoginArgs, ctx: &Context) -> Result<CommandOutput, CommandErro
         }
     }
 
-    Ok(render(&target, &plan, source))
+    Ok(render(&target, &options, &plan, source))
 }
 
 /// An `az` call that failed. The remedy names the step, because which of the
@@ -251,8 +233,7 @@ fn step_failed(step: &Step, code: i32) -> CommandError {
 ///
 /// The values are left out on purpose: one of them is the path of the private
 /// file a credential was written to, and a report that prints where a secret
-/// lives is a report that ends up in a CI log. `--dry-run` is the surface for
-/// the full command line, and it materialises nothing.
+/// lives is a report that ends up in a CI log.
 fn flags(step: &Step) -> Vec<String> {
     let words = step.args.iter().take_while(|arg| !arg.starts_with('-'));
     let flags = step.args.iter().filter(|arg| arg.starts_with("--"));
@@ -267,31 +248,30 @@ fn step_name(kind: StepKind) -> &'static str {
     }
 }
 
-fn common_json(
+fn render(
     target: &super::select::Target,
+    options: &Options,
     plan: &Plan,
     source: Option<&'static str>,
-) -> serde_json::Value {
-    json!({
+) -> CommandOutput {
+    // The values `login::plan` built the argv from, not the config's alone: a
+    // --tenant override reaches az, so it has to reach the report as well.
+    // This report is the only record of which identity the store now holds.
+    let tenant = login::effective_tenant(&target.effective, options);
+    let subscription = login::effective_subscription(&target.effective, options);
+
+    let mut json = json!({
         "store": target.store.to_string_lossy(),
         "selected_by": target.selected_by,
         "store_rule": target.store_rule,
         "environment": target.env(),
         "mode": plan.mode.as_str(),
         "cloud": target.declared_cloud.map(|cloud| cloud.as_str()),
-        "tenant": target.effective.tenant.as_ref().map(|t| t.as_str()),
-        "subscription": target.effective.subscription.as_ref().map(|s| s.as_str()),
+        "tenant": tenant.as_ref().map(|t| t.as_str()),
+        "subscription": subscription.as_ref().map(|s| s.as_str()),
         "credential_source": source,
         "warnings": target.warnings.iter().map(ToString::to_string).collect::<Vec<_>>(),
-    })
-}
-
-fn render(
-    target: &super::select::Target,
-    plan: &Plan,
-    source: Option<&'static str>,
-) -> CommandOutput {
-    let mut json = common_json(target, plan, source);
+    });
     json["logged_in"] = true.into();
     json["steps"] = plan
         .steps
@@ -308,10 +288,10 @@ fn render(
     if let Some(env) = target.env() {
         human.push_str(&format!("  environment  {env}\n"));
     }
-    if let Some(tenant) = &target.effective.tenant {
+    if let Some(tenant) = &tenant {
         human.push_str(&format!("  tenant       {tenant}\n"));
     }
-    if let Some(subscription) = &target.effective.subscription {
+    if let Some(subscription) = &subscription {
         human.push_str(&format!("  subscription {subscription}\n"));
     }
     if let Some(var) = source {
@@ -334,38 +314,4 @@ fn render(
         "mazet exec -- az account show",
         "mazet logout",
     ])
-}
-
-fn render_dry_run(
-    target: &super::select::Target,
-    plan: &Plan,
-    source: Option<&'static str>,
-) -> CommandOutput {
-    let mut json = common_json(target, plan, source);
-    json["logged_in"] = false.into();
-    json["dry_run"] = true.into();
-    json["steps"] = plan
-        .steps
-        .iter()
-        .map(|step| json!({ "step": step_name(step.kind), "args": step.args }))
-        .collect::<Vec<_>>()
-        .into();
-
-    let mut human = format!(
-        "dry run: nothing was executed\n\n  AZURE_CONFIG_DIR={}\n  mode {}\n\n",
-        target.store.display(),
-        plan.mode.as_str()
-    );
-    for step in &plan.steps {
-        human.push_str(&format!("  az {}\n", step.args.join(" ")));
-    }
-    if let Some(var) = source {
-        human.push_str(&format!(
-            "\n  <{var}> is where the credential comes from. On a real run mazet writes it\n  \
-             to a file that only you can read and passes az @<that path>, so the value\n  \
-             never appears in the command line of a process.\n"
-        ));
-    }
-
-    CommandOutput::new(json, human.trim_end().to_string()).help(["mazet login", "mazet which"])
 }

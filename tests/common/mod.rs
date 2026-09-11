@@ -322,17 +322,33 @@ impl Sandbox {
 
     /// Give a store a login, in the envelope `az` keeps its account list in.
     pub fn plant_login(&self, store: &Path, account: &str) {
-        std::fs::create_dir_all(store).expect("store");
-        std::fs::write(
-            store.join("azureProfile.json"),
-            format!(r#"{{"installationId":"test","subscriptions":[{account}]}}"#),
-        )
-        .expect("azureProfile.json");
+        self.plant_profile(
+            store,
+            &format!(r#"{{"installationId":"test","subscriptions":[{account}]}}"#),
+        );
     }
 
-    /// The accounts a store currently holds, read the way `mazet` reads them.
-    pub fn accounts_in(&self, store: &Path) -> bool {
-        mazet::status::holds_account(store)
+    /// Write `azureProfile.json` the way `az` writes it: UTF-8 with a BOM,
+    /// because azure-cli opens that session file as `utf-8-sig`. Anything that
+    /// reads it has to cope with the byte the real CLI actually puts there.
+    pub fn plant_profile(&self, store: &Path, body: &str) {
+        std::fs::create_dir_all(store).expect("store");
+        std::fs::write(store.join("azureProfile.json"), format!("\u{feff}{body}"))
+            .expect("azureProfile.json");
+    }
+
+    /// How many accounts a store holds, read straight out of `az`'s own
+    /// `azureProfile.json` rather than through the code under test.
+    pub fn accounts_in(&self, store: &Path) -> usize {
+        let Ok(text) = std::fs::read_to_string(store.join("azureProfile.json")) else {
+            return 0;
+        };
+        let profile: serde_json::Value =
+            serde_json::from_str(text.trim_start_matches('\u{feff}')).expect("az writes JSON");
+        profile["subscriptions"]
+            .as_array()
+            .map(Vec::len)
+            .unwrap_or(0)
     }
 }
 

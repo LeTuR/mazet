@@ -157,13 +157,6 @@ impl Az {
         Ok(Self { program })
     }
 
-    /// Use an explicit `az`, without consulting the environment.
-    pub fn at(program: impl Into<PathBuf>) -> Self {
-        Self {
-            program: program.into(),
-        }
-    }
-
     /// The binary that will be run.
     pub fn program(&self) -> &Path {
         &self.program
@@ -206,8 +199,12 @@ impl Az {
     }
 }
 
-/// Run an arbitrary command with `env` added to its environment, inheriting
+/// Run an arbitrary command with `env` applied to its environment, inheriting
 /// every stream.
+///
+/// A `None` value REMOVES the variable from the child rather than setting it:
+/// the identity a command runs as has to be decided here in full, and one the
+/// caller's shell exported earlier is not part of that decision.
 ///
 /// This is `mazet exec`. The child's stdout and stderr are the caller's own —
 /// nothing is captured, rewrapped or filtered — and the status it exits with
@@ -216,7 +213,7 @@ impl Az {
 pub fn exec(
     program: &OsStr,
     args: &[OsString],
-    env: &[(String, OsString)],
+    env: &[(String, Option<OsString>)],
 ) -> Result<i32, AzError> {
     let resolved = resolve_program(program).ok_or_else(|| AzError::NotFound {
         program: program.to_string_lossy().into_owned(),
@@ -224,7 +221,10 @@ pub fn exec(
     let mut command = Command::new(&resolved);
     command.args(args);
     for (key, value) in env {
-        command.env(key, value);
+        match value {
+            Some(value) => command.env(key, value),
+            None => command.env_remove(key),
+        };
     }
     let status = command.status().map_err(|source| AzError::Spawn {
         program: resolved.display().to_string(),
@@ -321,15 +321,6 @@ pub enum Kind {
 }
 
 impl Kind {
-    /// The `az login` flag this credential is passed as.
-    pub fn flag(self) -> &'static str {
-        match self {
-            Kind::Password => "--password",
-            Kind::Certificate => "--certificate",
-            Kind::Federated => "--federated-token",
-        }
-    }
-
     /// The variables consulted for it, highest precedence first.
     ///
     /// A `_FILE` spelling wins over a value spelling of the same credential:
@@ -385,16 +376,6 @@ pub struct Credential {
 }
 
 impl Credential {
-    /// The variable it came from. A name; never a value.
-    pub fn var(&self) -> &'static str {
-        self.var
-    }
-
-    /// Which credential this is.
-    pub fn kind(&self) -> Kind {
-        self.kind
-    }
-
     /// The argument to hand `az`.
     pub fn token(&self) -> &str {
         &self.token
@@ -607,9 +588,9 @@ impl TempSecret {
             options.mode(0o600);
         }
         let mut file = options.open(&path).map_err(failed)?;
-        // No trailing newline: `az` strips one when it expands `@<path>`, but
-        // a certificate or a token that grew one elsewhere is a support call
-        // nobody enjoys, so none is written in the first place.
+        // Exactly the bytes of the credential. `az` expands `@<path>` with a
+        // plain read and strips nothing (knack's `_expand_prefixed_files`), so
+        // a trailing newline here would be part of the password.
         file.write_all(bytes).map_err(failed)?;
         file.flush().map_err(failed)?;
         Ok(Self { path })

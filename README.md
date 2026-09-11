@@ -33,7 +33,7 @@ mazet login                    # az login, in the store this directory is bound 
 mazet logout                   # az logout, in that one store and nowhere else
 mazet exec -- terraform plan   # run anything against that identity
 mazet env                      # the shell assignments that put a shell there
-mazet status --all             # every store on this machine, and who is in it
+mazet status --all             # every profile and derived store, and who is in it
 mazet hook bash                # shell code that keeps AZURE_CONFIG_DIR in step
 mazet                          # what this machine knows about
 mazet profile add client-a     # register a profile with a store of its own
@@ -212,7 +212,6 @@ answers the same question with the provenance of every value.
 mazet login                              # in the store this directory is bound to
 mazet login --env prod                   # in the prod environment's own store
 mazet login --profile client-a           # in a registered profile's store
-mazet login --dry-run                    # print the az calls, run none of them
 ```
 
 Every authentication mode `az login` has is reachable. The **method** comes from
@@ -243,7 +242,11 @@ and it is part of what gives that store its own directory.
 declares it as a multi-value argument and would keep only the last of several.
 `--skip-subscription-discovery` requires a tenant — that is `az`'s own rule, and
 `mazet` says so before starting anything rather than letting `az` fail — and
-with a subscription it needs the **id**, not a display name.
+with a subscription it needs the **id**, not a display name. It cannot be
+combined with a managed identity at all, since `az` refuses a tenant there.
+A device code login cannot take a `--username` either: whoever types the code is
+who the store becomes, so `mazet` refuses the pair rather than quietly dropping
+the name.
 
 A password lying around does not silently change an interactive login into a
 password one: that happens only when `--username` asks for it. An
@@ -327,6 +330,12 @@ the Terraform `azurerm` provider reads *instead* of the store:
 | `ARM_TENANT_ID` | when the selected environment names a tenant |
 | `ARM_SUBSCRIPTION_ID` | when it names a subscription **as an id** |
 
+A variable the selected environment does **not** name is removed from the child
+rather than left standing, and `mazet env` prints an `unset` for it: the shell
+you are in may still hold another store's `ARM_SUBSCRIPTION_ID` from an earlier
+`eval "$(mazet env --env prod)"`, and `azurerm` prefers that variable over the
+store.
+
 `ARM_SUBSCRIPTION_ID` is left unset for a subscription written as a display
 name, because `azurerm` takes only a GUID there and a name would fail the plan
 with a parse error. Unset, the provider falls back to the store's active
@@ -352,7 +361,7 @@ the difference.
 ```sh
 mazet status                     # the store this directory is bound to
 mazet status --profile client-a  # a registered profile's store
-mazet status --all               # every store on this machine
+mazet status --all               # every profile and derived store
 ```
 
 For each store: the directory, whether a login is present, and the tenant,
@@ -362,7 +371,10 @@ every store starts in, and it is also the state `mazet logout` leaves behind. Th
 two are reported apart, because `az logout` empties the account list in
 `azureProfile.json` rather than removing the file, so what is *in* that file is
 the answer and its presence is not. `--all` asks the stores at the same time and skips
-`az` entirely for the ones with no login, so ten profiles stay fast.
+`az` entirely for the ones with no login, so ten profiles stay fast. It covers the
+registered profiles and the derived stores under mazet's data directory; a tree
+that keeps its store inside its own `.mazet/` is reported by running
+`mazet status` in that tree.
 
 ## Which `az`
 

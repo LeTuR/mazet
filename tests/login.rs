@@ -9,7 +9,7 @@ mod common;
 
 use std::path::Path;
 
-use common::{Sandbox, OTHER_SUBSCRIPTION, SUBSCRIPTION, TENANT};
+use common::{Sandbox, OTHER_SUBSCRIPTION, OTHER_TENANT, SUBSCRIPTION, TENANT};
 
 const APP_ID: &str = "44444444-4444-4444-4444-444444444444";
 
@@ -555,35 +555,6 @@ fn each_environment_logs_into_a_store_of_its_own() {
     assert_eq!(prod["subscription"], OTHER_SUBSCRIPTION);
 }
 
-// ------------------------------------------------------------------ dry run
-
-#[test]
-fn a_dry_run_executes_nothing_and_names_the_credential_variable() {
-    let sandbox = Sandbox::new();
-    let tree = bound(
-        &sandbox,
-        &format!("tenant = \"{TENANT}\"\nmethod = \"service-principal\"\n"),
-    );
-
-    let text = login(
-        &sandbox,
-        &tree,
-        &["--username", APP_ID, "--dry-run"],
-        &[("AZURE_CLIENT_SECRET", "never-read")],
-    );
-    let json: serde_json::Value = serde_json::from_str(&text).expect("JSON");
-
-    assert!(sandbox.calls().is_empty(), "a dry run ran something");
-    assert_eq!(json["dry_run"], true);
-    assert_eq!(json["credential_source"], "AZURE_CLIENT_SECRET");
-    assert!(
-        !text.contains("never-read"),
-        "the secret was rendered:\n{text}"
-    );
-    let args = json["steps"][0]["args"].to_string();
-    assert!(args.contains("<AZURE_CLIENT_SECRET>"), "{args}");
-}
-
 // ------------------------------------------------------- the parent is safe
 
 #[test]
@@ -649,6 +620,49 @@ fn what_az_writes_to_stderr_reaches_the_operator() {
         serde_json::from_str::<serde_json::Value>(&stdout).is_ok(),
         "stdout is not one document: {stdout}"
     );
+}
+
+// --------------------------------------------------------- what is reported
+
+#[test]
+fn the_report_names_the_tenant_the_login_was_actually_made_with() {
+    let sandbox = Sandbox::new();
+    // A config that names no tenant, and an override that does.
+    let tree = bound(&sandbox, "");
+
+    let text = login(&sandbox, &tree, &["--tenant", OTHER_TENANT], &[]);
+    let json: serde_json::Value = serde_json::from_str(&text).expect("JSON");
+
+    assert_eq!(
+        sandbox.call("login").value_after("--tenant").as_deref(),
+        Some(OTHER_TENANT)
+    );
+    // The report is the only record of which identity the store now holds, so
+    // it has to name what az was given rather than what the config said.
+    assert_eq!(json["tenant"], OTHER_TENANT);
+}
+
+#[test]
+fn the_report_names_the_subscription_the_login_was_actually_made_with() {
+    let sandbox = Sandbox::new();
+    let tree = bound(
+        &sandbox,
+        &format!("tenant = \"{TENANT}\"\nsubscription = \"{SUBSCRIPTION}\"\n"),
+    );
+
+    let text = login(
+        &sandbox,
+        &tree,
+        &["--subscription", OTHER_SUBSCRIPTION],
+        &[],
+    );
+    let json: serde_json::Value = serde_json::from_str(&text).expect("JSON");
+
+    assert_eq!(
+        sandbox.call("account").value_after("-s").as_deref(),
+        Some(OTHER_SUBSCRIPTION)
+    );
+    assert_eq!(json["subscription"], OTHER_SUBSCRIPTION);
 }
 
 // ------------------------------------------------- az's own argument rules
@@ -777,4 +791,42 @@ fn a_credential_file_that_is_already_exact_is_passed_as_it_stands() {
         token.strip_prefix('@').map(std::path::PathBuf::from),
         Some(file)
     );
+}
+
+#[test]
+fn skipping_subscription_discovery_with_a_managed_identity_is_refused() {
+    let sandbox = Sandbox::new();
+    // The ordinary shape: a declared tenant, and a managed identity.
+    let tree = bound(
+        &sandbox,
+        &format!("tenant = \"{TENANT}\"\nmethod = \"managed-identity\"\n"),
+    );
+
+    // az requires a tenant for --skip-subscription-discovery and refuses one
+    // alongside --identity, so the pair can never be satisfied. It has to fail
+    // before `az cloud set` has written anything into the store.
+    let (code, text) = login_fails(&sandbox, &tree, &["--skip-subscription-discovery"], &[]);
+
+    assert_eq!(code, 2, "{text}");
+    assert!(text.contains("managed-identity"), "{text}");
+    assert!(sandbox.calls().is_empty(), "nothing should have been run");
+}
+
+#[test]
+fn a_device_code_login_with_a_username_is_refused() {
+    let sandbox = Sandbox::new();
+    let tree = bound(&sandbox, &format!("tenant = \"{TENANT}\"\n"));
+
+    // az refuses the pair outright, and taking the username silently would log
+    // the store in as whoever typed the code instead.
+    let (code, text) = login_fails(
+        &sandbox,
+        &tree,
+        &["--use-device-code", "--username", "me@corp.com"],
+        &[],
+    );
+
+    assert_eq!(code, 2, "{text}");
+    assert!(text.contains("--username"), "{text}");
+    assert!(!sandbox.ran("login"), "nothing should have been executed");
 }

@@ -100,6 +100,31 @@ fn a_config_that_names_neither_exports_neither() {
 }
 
 #[test]
+fn an_inherited_identifier_the_config_does_not_name_is_cleared() {
+    let sandbox = Sandbox::new();
+    let tree = bound(
+        &sandbox,
+        &format!("tenant = \"{TENANT}\"\nsubscription = \"Production Platform\"\n"),
+    );
+
+    // The shape an operator ends up in: `eval "$(mazet env --env prod)"` in
+    // this shell, then a tree that names its subscription by display name.
+    // azurerm prefers the variable over the store, so a stale one there is a
+    // plan against the wrong subscription.
+    sandbox
+        .mazet_stubbed(&tree)
+        .args(["exec", "--", CHILD, "plan"])
+        .env("ARM_SUBSCRIPTION_ID", OTHER_SUBSCRIPTION)
+        .env("ARM_TENANT_ID", "99999999-9999-9999-9999-999999999999")
+        .output()
+        .expect("run mazet exec");
+
+    let call = sandbox.call("plan");
+    assert_eq!(call.env("ARM_SUBSCRIPTION_ID"), None);
+    assert_eq!(call.env("ARM_TENANT_ID").as_deref(), Some(TENANT));
+}
+
+#[test]
 fn the_childs_exit_status_is_the_commands_exit_status() {
     let sandbox = Sandbox::new();
     let tree = bound(&sandbox, "");
