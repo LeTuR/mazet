@@ -35,10 +35,148 @@ ignore_patterns:
 auto_fix:
   review: 0
 
+# Documentation ownership map for the document step's placement policy. Every
+# class of fact has exactly one owner; the step reduces a duplicate to a
+# pointer rather than keeping two copies in step, because a fact with two
+# owners drifts.
+document:
+  instructions: |
+    README.md owns the introduction and the user-facing tour: what mazet is,
+    how to install it, and how to use each command, with the worked examples.
+    It is the front door and stays one - do not move out of it something a user
+    needs on arrival. docs/ owns the reasoning behind it, and where the two
+    touch the docs/ owner is the authority for the detail.
+
+    docs/ARCHITECTURE.md owns the architectural decisions and their rationale:
+    the az constraint everything follows from (one AZURE_CONFIG_DIR holds one
+    active subscription, which is why an environment is a store rather than a
+    switch), the module layering that tests/architecture_rules.rs enforces, the
+    credential boundary at src/az.rs, and why the derived store key is a hash
+    this crate owns. A change to MODULE_RULES updates this document in the same
+    change.
+
+    docs/FEATURES.md owns feature-level design choices - why a .mazet is two
+    layers and which key belongs in which, why every field is optional and an
+    empty file still binds a tree, why the shell hook unexports on the way out,
+    why exit code 3 exists, why exec prints no document and env prints code
+    rather than setting anything.
+
+    docs/CONFIG.md owns mazet's own configuration, exhaustively and in one
+    place: both .mazet spellings, every key of both layers, the layering and
+    precedence tables, the environment variables mazet reads and the ones it
+    hands a child, the registry format, the per-platform paths, and the
+    store-key derivation. A new key, variable or path is documented here.
+
+    docs/DEVELOPMENT.md owns building, the test suite and its layout, the lint
+    gates and the pre-commit hooks. CONTRIBUTING.md deliberately defers to it
+    rather than restating it, and owns the contribution process itself: how to
+    propose a change, the commit conventions, the pull-request and squash-merge
+    rules. The configuration of external tooling - .no-mistakes.yaml,
+    cog.toml, renovate.json - is CONTRIBUTING.md's or the file's own comments,
+    not docs/CONFIG.md's: that document is about mazet's configuration, not the
+    repository's.
+
+    docs/RELEASING.md owns the release process and the installers' contract
+    with it. docs/README.md is the index into all of the above, one line each.
+    CLAUDE.md is the agent-facing index: pointers, plus the guidance an agent
+    needs on every turn, and a code change that invalidates or extends a
+    documented decision updates the owning document in the same change.
+
+    This repository intentionally has no CHANGELOG.md - release notes are
+    generated from conventional commits by cocogitto - and no
+    docs/CONSTITUTION.md, because its two non-negotiable rules are architecture
+    decisions that docs/ARCHITECTURE.md already owns. Do not create either, and
+    do not add a documentation file to close a perceived gap when an owner
+    above already covers the subject.
+
 # House rules a reviewer reading only the diff would not know, scoped to the
 # paths a change actually touches.
 review:
   path_instructions:
+    - path: "src/**"
+      instructions: |
+        Module boundaries are enforced by tests/architecture_rules.rs as an
+        allowlist: every module under src/ has an entry naming what it may
+        reference, and a new module fails that test until its entry is
+        declared. Two of its rules are the ones that would hurt to break, and
+        a change here is read against both.
+
+        src/az.rs is the ONLY module that starts a process or touches a
+        credential, and it reaches nothing else in the crate. A .mazet is a
+        file a repository commits, so a Command::new in a config parser or a
+        path helper would turn a committed file into something that executes -
+        which is the one outcome this crate exists to make impossible. The
+        parse-and-derive layer (config, discover, paths, profile, store,
+        resolve, init, explain) names neither az nor exec in its entries, and
+        that is deliberate rather than incidental.
+
+        Nothing under src/ mutates this process's environment.
+        AZURE_CONFIG_DIR is set on the child; mazet env prints code for a
+        shell to evaluate. A std::env::set_var anywhere here moves an identity
+        nobody asked to move, and outlives the command.
+
+        A boundary is never widened to make the test pass. Widening one is a
+        decision, and docs/ARCHITECTURE.md records it in the same change.
+
+        A secret never reaches argv: az expands an argument written @<path> by
+        reading that file, so every credential is handed over as a path, and a
+        value-spelled one is written to a 0600 file inside the 0700 store and
+        deleted afterwards. A credential is never rendered either - an error
+        names the variable to set, never what was in it.
+
+        Every error renders as one line saying what failed, followed by
+        indented lines saying what to do about it; error_output splits on that
+        boundary. An error that only reports the failure leaves the operator
+        to guess the fix.
+
+        An absent config key is never an error - it skips a step. A present
+        but malformed one always is, naming the file and the key.
+
+        This repository is test-driven: a bug fix starts with a test that
+        reproduces it, failing before the fix and passing after. Tests live
+        under tests/, one file per surface; there are no #[cfg(test)] blocks
+        under src/, and the architecture test's super:: resolution assumes
+        that. A behaviour is asserted by running the code, never by grepping
+        the source for a string.
+
+        Comments explain why, never what. A stale comment is worse than none,
+        so comments around touched code are fixed or deleted. No TODO, FIXME
+        or HACK markers, and no commented-out code.
+
+        src/lib.rs carries #![deny(missing_docs)] and the crate documents
+        itself in intra-doc links, so a new public item needs a doc comment and
+        a broken link fails the gate.
+
+    - path: "tests/**"
+      instructions: |
+        Integration tests against the real binary or the library, one file per
+        surface. Follow the conventions already in the file that owns the
+        surface rather than adding a new file beside it, and cover the edge
+        case as well as the happy path.
+
+        Every test builds its own sandbox through tests/common/mod.rs - its own
+        data and config roots - so nothing reaches the developer's real
+        ~/.local/share/mazet and tests run in parallel. A test that reads or
+        writes a real root is a bug in the test.
+
+        The az surface is exercised against examples/az_stub.rs, which records
+        argv, the identity-deciding variables and the contents of any @<file>
+        argument as JSON lines. Assert on what mazet would have handed az, not
+        on prose it printed about it.
+
+        tests/architecture_rules.rs is the allowlist, and its value is that it
+        fails. A change that makes it pass by widening MODULE_RULES is a
+        change to the architecture and needs docs/ARCHITECTURE.md with it.
+
+    - path: "docs/**"
+      instructions: |
+        Documentation prose. Do not request test coverage for it.
+
+        Each file owns one class of fact (see document.instructions above) and
+        points rather than repeats - a fact in two documents drifts. Documents
+        describe what IS: no roadmap, no "will support", no TODO. Something
+        deliberately absent is said to be absent, with why.
+
     - path: "install.*"
       instructions: |
         The two installers are a mirrored pair - install.sh for Linux and
