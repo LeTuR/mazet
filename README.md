@@ -41,6 +41,11 @@ human-readable on a terminal and [TOON](https://github.com/toon-format/spec)
 down a pipe, every help surface carries worked examples, and errors say what to
 do next. Force a format with `--json`, `--pretty`, `--toon` or `--text`.
 
+The two `mazet hook` outputs are the exception to the pipe default: shell code
+for `eval`, and the single store path a hook captures with `$(...)`, stay raw
+down a pipe, because TOON there is something no shell can run. An explicit
+`--json`, `--pretty` or `--toon` still wins.
+
 Exit codes are `0` for success, `1` for a command that ran and failed, `2` for
 a usage error, and `3` for a directory that is bound to no `.mazet`. A failure
 prints a structured `error`/`suggestion` document on **stdout**, so a caller
@@ -129,7 +134,7 @@ error: no .mazet in /tmp or any directory above it.
 ## The shell hook — bare `az`, no wrapper
 
 With the hook installed, `az` itself honours the directory. The hook re-resolves
-on every directory change and exports `AZURE_CONFIG_DIR` for the matched tree.
+before every prompt and exports `AZURE_CONFIG_DIR` for the matched tree.
 
 | shell | line | file |
 |---|---|---|
@@ -290,10 +295,11 @@ client secret, a certificate, a token — does not, and the parser refuses it
 rather than storing it. Those reach `az` from the environment at login time.
 
 **`mazet` holds paths and names; `az` holds secrets, in the directory `mazet`
-points it at.** A config is safe to commit; a store never is. When `mazet`
-creates a local store it writes `.mazet/.gitignore` covering `store/` and
-`local.toml`; for the flat spelling it adds `.mazet.local` to the tree's own
-`.gitignore`. A store directory is `0700` on Unix.
+points it at.** A config is safe to commit; a store never is. `mazet` writes
+the ignore rules the moment it puts anything beside a config — `mazet init`
+does it before any store exists: `.mazet/.gitignore` covering `store/` and
+`local.toml` for the directory spelling, and a `.mazet.local` entry in the
+tree's own `.gitignore` for the flat one. A store directory is `0700` on Unix.
 
 ## A worked example: an infra repository
 
