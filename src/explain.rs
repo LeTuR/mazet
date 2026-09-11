@@ -89,10 +89,14 @@ pub struct Field {
 }
 
 impl Field {
-    fn new(value: Option<String>, origin: Origin, file: Option<PathBuf>) -> Self {
-        let file = match origin {
-            Origin::Default | Origin::Unset => None,
-            _ => file,
+    /// The file is a function of the layer, never of the caller: the shared
+    /// config for a top-level or `[env.*]` key, the local override for a local
+    /// one, and nothing at all for a value that no `.mazet` declared.
+    fn new(value: Option<String>, origin: Origin, shared: &Path, local: &Path) -> Self {
+        let file = match &origin {
+            Origin::Shared | Origin::Env(_) => Some(shared.to_path_buf()),
+            Origin::Local => Some(local.to_path_buf()),
+            Origin::Registry | Origin::Default | Origin::Unset => None,
         };
         Self {
             value,
@@ -241,16 +245,15 @@ impl Explanation {
             Origin::Default
         };
         // `method` is the one key the local layer may override on its own.
-        let (method_origin, method_file) =
-            if config.local.as_ref().is_some_and(|l| l.method.is_some()) {
-                (Origin::Local, local_file.clone())
-            } else if block.is_some_and(|b| b.method.is_some()) {
-                (in_env(&choice.name), shared_file.clone())
-            } else if config.shared.method.is_some() {
-                (Origin::Shared, shared_file.clone())
-            } else {
-                (Origin::Default, shared_file.clone())
-            };
+        let method_origin = if config.local.as_ref().is_some_and(|l| l.method.is_some()) {
+            Origin::Local
+        } else if block.is_some_and(|b| b.method.is_some()) {
+            in_env(&choice.name)
+        } else if config.shared.method.is_some() {
+            Origin::Shared
+        } else {
+            Origin::Default
+        };
 
         let effective = &resolved.effective;
         let identity_value = effective
@@ -258,11 +261,11 @@ impl Explanation {
             .username
             .clone()
             .or_else(|| effective.identity.client_id.clone());
-        let (identity_origin, identity_file) = match effective.identity_source {
-            IdentitySource::Local => (Origin::Local, local_file.clone()),
-            IdentitySource::Shared => (Origin::Shared, shared_file.clone()),
-            IdentitySource::Registry => (Origin::Registry, shared_file.clone()),
-            IdentitySource::None => (Origin::Unset, shared_file.clone()),
+        let identity_origin = match effective.identity_source {
+            IdentitySource::Local => Origin::Local,
+            IdentitySource::Shared => Origin::Shared,
+            IdentitySource::Registry => Origin::Registry,
+            IdentitySource::None => Origin::Unset,
         };
 
         let store_rule = match &resolved.source {
@@ -286,24 +289,28 @@ impl Explanation {
             tenant: Field::new(
                 effective.tenant.as_ref().map(|t| t.to_string()),
                 tenant_origin,
-                Some(shared_file.clone()),
+                &shared_file,
+                &local_file,
             ),
             subscription: Field::new(
                 effective.subscription.as_ref().map(|s| s.to_string()),
                 subscription_origin,
-                Some(shared_file.clone()),
+                &shared_file,
+                &local_file,
             ),
             cloud: Field::new(
                 Some(effective.cloud.to_string()),
                 cloud_origin,
-                Some(shared_file.clone()),
+                &shared_file,
+                &local_file,
             ),
             method: Field::new(
                 Some(effective.method.to_string()),
                 method_origin,
-                Some(method_file),
+                &shared_file,
+                &local_file,
             ),
-            identity: Field::new(identity_value, identity_origin, Some(identity_file)),
+            identity: Field::new(identity_value, identity_origin, &shared_file, &local_file),
             store: resolved.store.clone(),
             store_rule,
             store_exists: resolved.store.is_dir(),

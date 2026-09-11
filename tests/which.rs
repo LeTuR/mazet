@@ -235,6 +235,14 @@ fn a_registry_identity_default_is_named_as_the_registry() {
     assert_eq!(json["effective"]["identity"]["value"], "me@corp.com");
     assert_eq!(json["effective"]["identity"]["state"], "declared");
     assert_eq!(json["effective"]["identity"]["layer"], "registry");
+    // ...and named no .mazet, because no .mazet declared it: the shared config
+    // here has a tenant and nothing else.
+    assert!(
+        json["effective"]["identity"]["file"].is_null(),
+        "a registry default must not be attributed to a file that does not \
+         declare it: {}",
+        json["effective"]["identity"]
+    );
 }
 
 #[test]

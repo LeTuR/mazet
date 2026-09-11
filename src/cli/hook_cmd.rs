@@ -25,12 +25,46 @@ every directory change, exports AZURE_CONFIG_DIR for the matched tree, and
 CLEARS it again when you leave that tree — so the last directory's identity
 never follows you into an unrelated one.
 
-MAZET_ENV is respected, so `export MAZET_ENV=prod` picks the environment for
-a whole shell and every directory in it resolves accordingly.
+MAZET_ENV is respected: in a tree that declares an [env.prod] block, `export
+MAZET_ENV=prod` picks it. A tree that declares no environment of that name is
+an error there, the same as `--env prod` would be, so set it per repository
+rather than for a whole shell.
 
 Evaluating a hook twice in one shell installs one hook. With mazet off PATH,
 or a .mazet that does not parse, the shell stays usable and the problem is
 reported once rather than on every prompt.";
+
+const BASH_EXAMPLES: &str = "\
+Examples:
+  eval \"$(mazet hook bash)\"       install the hook for this shell
+  echo 'eval \"$(mazet hook bash)\"' >> ~/.bashrc    ...and for every shell after it
+
+Then bare `az` honours the directory: entering a bound tree exports its
+AZURE_CONFIG_DIR, and leaving it restores what the shell had.";
+
+const ZSH_EXAMPLES: &str = "\
+Examples:
+  eval \"$(mazet hook zsh)\"        install the hook for this shell
+  echo 'eval \"$(mazet hook zsh)\"' >> ~/.zshrc      ...and for every shell after it
+
+Then bare `az` honours the directory: entering a bound tree exports its
+AZURE_CONFIG_DIR, and leaving it restores what the shell had.";
+
+const FISH_EXAMPLES: &str = "\
+Examples:
+  mazet hook fish | source       install the hook for this shell
+  mazet hook fish > ~/.config/fish/conf.d/mazet.fish   ...and for every shell after it
+
+Then bare `az` honours the directory: entering a bound tree exports its
+AZURE_CONFIG_DIR, and leaving it restores what the shell had.";
+
+const POWERSHELL_EXAMPLES: &str = "\
+Examples:
+  Invoke-Expression (& mazet hook powershell | Out-String)     install it here
+  mazet hook powershell | Add-Content $PROFILE                 ...and in every session after
+
+Then bare `az` honours the directory: entering a bound tree exports its
+AZURE_CONFIG_DIR, and leaving it restores what the shell had.";
 
 const RESOLVE_EXAMPLES: &str = "\
 Examples:
@@ -48,13 +82,16 @@ bound to no .mazet, 1 when a .mazet was found and could not be used.";
 #[derive(Debug, Subcommand)]
 pub enum HookCommand {
     /// Shell code for bash, for `~/.bashrc`.
+    #[command(after_help = BASH_EXAMPLES, after_long_help = BASH_EXAMPLES)]
     Bash,
     /// Shell code for zsh, for `~/.zshrc`.
+    #[command(after_help = ZSH_EXAMPLES, after_long_help = ZSH_EXAMPLES)]
     Zsh,
     /// Shell code for fish, for `~/.config/fish/config.fish`.
+    #[command(after_help = FISH_EXAMPLES, after_long_help = FISH_EXAMPLES)]
     Fish,
     /// Shell code for PowerShell, for `$PROFILE`.
-    #[command(visible_alias = "pwsh")]
+    #[command(after_help = POWERSHELL_EXAMPLES, after_long_help = POWERSHELL_EXAMPLES)]
     Powershell,
     /// The store this directory resolves to — what the hook calls each prompt.
     #[command(after_help = RESOLVE_EXAMPLES, after_long_help = RESOLVE_EXAMPLES)]

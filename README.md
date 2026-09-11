@@ -167,8 +167,11 @@ The rest of what the hook guarantees:
 - **`$?` survives it**, so a prompt that shows the last exit status keeps
   telling the truth.
 
-`MAZET_ENV` is respected, so `export MAZET_ENV=prod` picks the environment for a
-whole shell and every directory in it resolves accordingly.
+`MAZET_ENV` is respected, exactly as `--env` is: in a tree that declares an
+`[env.prod]` block, `MAZET_ENV=prod` picks it. A tree that declares no
+environment of that name reports the error instead of guessing — so set it per
+repository (or per command, as below) rather than exporting it for a whole
+shell.
 
 Under the hood the hook calls `mazet hook resolve`, which prints one line — the
 store — and nothing else. You do not normally run it yourself; `mazet which`

@@ -310,6 +310,45 @@ fn force_does_not_change_the_spelling() {
 }
 
 #[test]
+fn an_existing_local_override_means_no_store_is_created_or_claimed() {
+    let sandbox = Sandbox::new();
+    let tree = sandbox.subdir("tree");
+    // The operator's own local override, with an identity and no `store` key.
+    let marker = sandbox.dir(&tree, "");
+    sandbox.dir_local(&marker, "username = \"me@corp.com\"\n");
+
+    let out = init(&sandbox, &tree, &["--local", "--force", "--json"]);
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(out.status.success(), "mazet init failed:\n{text}");
+    let written: serde_json::Value = serde_json::from_str(&text).expect("valid JSON");
+
+    // `store = "local"` was not written, so nothing beside the config is the
+    // store, and init must not say otherwise.
+    assert!(
+        written["store"].is_null(),
+        "init must not report a store it did not point the tree at: {text}"
+    );
+    assert!(
+        !marker.join("store").is_dir(),
+        "init must not create a store nothing resolves to"
+    );
+
+    // And what the tree actually resolves to is the derived store.
+    let resolve_out = sandbox
+        .mazet(&tree)
+        .args(["hook", "resolve", "--json"])
+        .output()
+        .expect("run mazet hook resolve");
+    let resolved: serde_json::Value =
+        serde_json::from_slice(&resolve_out.stdout).expect("valid JSON");
+    assert_ne!(
+        resolved["store"].as_str().map(Path::new),
+        Some(marker.join("store").as_path()),
+        "the tree resolves to the derived store, not the one beside the config"
+    );
+}
+
+#[test]
 fn force_keeps_an_existing_local_override() {
     let sandbox = Sandbox::new();
     let tree = sandbox.subdir("tree");

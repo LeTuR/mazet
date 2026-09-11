@@ -76,6 +76,13 @@ pub fn run(
     if let Some(store) = &written.store {
         human.push_str(&format!("\n  store    {}", store.display()));
     }
+    let kept_local = local && written.local_file.is_none();
+    if kept_local {
+        human.push_str(&format!(
+            "\n  kept     {} (already there, left untouched)",
+            written.config.join("local.toml").display()
+        ));
+    }
     for ignore in &written.ignores {
         human.push_str(&format!("\n  ignored  {}", ignore.display()));
     }
@@ -83,6 +90,13 @@ pub fn run(
         "\n\nThe shared config is meant to be committed; the local override is not.\n\
          Run `mazet which` to see what this directory now resolves to.",
     );
+    if kept_local {
+        human.push_str(
+            "\n\nYour own local override was already here, so `store = \"local\"` was not\n\
+             written and no store was created beside the config. Add that line yourself\n\
+             if you want this tree's credentials to live inside it.",
+        );
+    }
 
     Ok(CommandOutput::new(
         json!({
@@ -90,6 +104,7 @@ pub fn run(
             "shared_file": written.shared_file.to_string_lossy(),
             "local_file": written.local_file.as_ref().map(|f| f.to_string_lossy()),
             "store": written.store.as_ref().map(|s| s.to_string_lossy()),
+            "kept_local": kept_local,
             "ignores": written.ignores.iter().map(|i| i.to_string_lossy()).collect::<Vec<_>>(),
             "spelling": if local { "directory" } else { "file" },
         }),

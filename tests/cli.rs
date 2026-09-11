@@ -62,7 +62,7 @@ fn every_help_surface_carries_worked_examples() {
         assert!(out.status.success(), "{args:?} must succeed");
         let text = stdout(&out);
         assert!(
-            text.contains("mazet ") || text.contains("Examples:"),
+            text.contains("Examples:"),
             "`mazet {}` must show a worked example:\n{text}",
             args.join(" ")
         );

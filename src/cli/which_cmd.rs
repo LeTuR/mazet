@@ -202,30 +202,8 @@ fn render(explanation: &Explanation) -> CommandOutput {
     });
 
     CommandOutput::new(json, human.trim_end().to_string()).help([
-        "mazet which --json".to_string(),
-        "mazet which --env <name>".to_string(),
-        format!(
-            "mazet hook {}   # keep az in step with the directory",
-            default_shell()
-        ),
+        "mazet which --json",
+        "mazet which --env <name>",
+        "mazet hook <shell>   # keep az in step with the directory",
     ])
-}
-
-/// The shell to name in the `help[N]:` trailer. `SHELL` is what the operator
-/// is actually using, so the suggestion is one they can paste.
-fn default_shell() -> &'static str {
-    match std::env::var("SHELL")
-        .ok()
-        .and_then(|s| {
-            std::path::Path::new(&s)
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-        })
-        .as_deref()
-    {
-        Some("zsh") => "zsh",
-        Some("fish") => "fish",
-        Some("pwsh") | Some("powershell") => "powershell",
-        _ => "bash",
-    }
 }

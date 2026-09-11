@@ -50,8 +50,6 @@
 //! and the store's contents are `mazet which`'s job, not something to print
 //! before every command line.
 
-use std::fmt;
-
 /// A shell `mazet hook` can emit code for.
 // `PowerShell` reads as the enum's own name to clippy. It is the shell's
 // name, spelled the way Microsoft spells it, and every other variant here is
@@ -69,9 +67,6 @@ pub enum Shell {
     PowerShell,
 }
 
-/// The names accepted on the command line, in the order `--help` lists them.
-pub const SHELLS: [&str; 4] = ["bash", "zsh", "fish", "powershell"];
-
 impl Shell {
     /// The name this shell is written as.
     pub fn as_str(self) -> &'static str {
@@ -80,18 +75,6 @@ impl Shell {
             Shell::Zsh => "zsh",
             Shell::Fish => "fish",
             Shell::PowerShell => "powershell",
-        }
-    }
-
-    /// Parse a shell name, case-insensitively. `pwsh` is accepted for
-    /// PowerShell, because that is what the binary is called.
-    pub fn parse(value: &str) -> Option<Self> {
-        match value.to_ascii_lowercase().as_str() {
-            "bash" => Some(Shell::Bash),
-            "zsh" => Some(Shell::Zsh),
-            "fish" => Some(Shell::Fish),
-            "powershell" | "pwsh" => Some(Shell::PowerShell),
-            _ => None,
         }
     }
 
@@ -123,12 +106,6 @@ impl Shell {
             Shell::Fish => FISH,
             Shell::PowerShell => POWERSHELL,
         }
-    }
-}
-
-impl fmt::Display for Shell {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
     }
 }
 

@@ -11,7 +11,7 @@
 //! |---|---|---|
 //! | shared config | `.mazet` | `.mazet/config.toml` |
 //! | local override | `.mazet.local` (not written) | `.mazet/local.toml` (`store = "local"`) |
-//! | store | a central one, derived | `.mazet/store/` |
+//! | store | a central one, derived | `.mazet/store/`, when the local override was written |
 //! | ignore rules | `.mazet.local` into `.gitignore` | `store/` and `local.toml` into `.mazet/.gitignore` |
 //!
 //! **The shared config is meant to be committed; the local override is not.**
@@ -59,9 +59,11 @@ pub struct Written {
     pub config: PathBuf,
     /// The file the shared layer was written to.
     pub shared_file: PathBuf,
-    /// The local override, when `--local` wrote one.
+    /// The local override, when `--local` wrote one. `None` when the operator
+    /// already had one, which `init` never touches.
     pub local_file: Option<PathBuf>,
-    /// The folder-local store, when `--local` created one.
+    /// The folder-local store, created only when this run also wrote the
+    /// `store = "local"` that points at it.
     pub store: Option<PathBuf>,
     /// Every ignore file that was written or extended.
     pub ignores: Vec<PathBuf>,
@@ -311,21 +313,19 @@ pub fn write(dir: &Path, plan: &Plan, force: bool) -> Result<Written, InitError>
             .join(".gitignore")],
     };
 
-    let (local_file, store_dir) = if plan.local {
+    // An existing local override is the operator's own file and holds their
+    // identity: extend nothing, clobber nothing. `store = "local"` lives in
+    // that file, so when it is left alone the store beside the config is
+    // neither created nor claimed — the tree resolves to whatever the
+    // operator's own file says, and `mazet which` is what answers that.
+    let (local_file, store_dir) = if plan.local && !location.local_file().exists() {
         let local_file = location.local_file();
-        // An existing local override is the operator's own file and holds
-        // their identity: extend nothing, clobber nothing.
-        let wrote_local = if local_file.exists() {
-            None
-        } else {
-            write_file(&local_file, &plan.render_local())?;
-            Some(local_file)
-        };
+        write_file(&local_file, &plan.render_local())?;
         let store_dir = location
             .local_store()
             .expect("the directory spelling always has a local store");
         store::ensure_dir(&store_dir)?;
-        (wrote_local, Some(store_dir))
+        (Some(local_file), Some(store_dir))
     } else {
         (None, None)
     };
