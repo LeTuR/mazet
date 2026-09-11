@@ -67,7 +67,7 @@
 //! |---|---|
 //! | `tenant` | no `--tenant` on the login |
 //! | `subscription` | nothing is selected after login |
-//! | `cloud` | [`Cloud::AzureCloud`] |
+//! | `cloud` | [`Cloud::AzureCloud`] as the effective value, and no `az cloud set` at all ([`crate::login::declared_cloud`]) |
 //! | `method` | [`Method::Interactive`] |
 //! | `default_env`, several `[env.*]`, no selection | the top-level keys, and a warning |
 //! | every key | the store is bound to this config's location and nothing else |

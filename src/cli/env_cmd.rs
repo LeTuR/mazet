@@ -10,7 +10,9 @@
 //! The human rendering is the payload, the way `mazet hook` is: shell code
 //! headed for `eval`, so it stays raw down a pipe where TOON would be
 //! something no shell can run. `--json` still gives the variables as a map,
-//! for a caller that would rather set them itself.
+//! for a caller that would rather set them itself — with the names to REMOVE
+//! under `unset`, because a caller that only applies the map leaves another
+//! store's `ARM_SUBSCRIPTION_ID` standing.
 
 use clap::{Args, ValueEnum};
 use serde_json::json;

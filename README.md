@@ -348,7 +348,7 @@ than one command:
 eval "$(mazet env)"                       # this shell, in this directory's store
 eval "$(mazet env --profile client-a)"    # ...in that profile's store
 mazet env --shell fish | source
-mazet env --json                          # the variables as a map, for a script
+mazet env --json                          # `variables` to set, `unset` to remove, for a script
 ```
 
 `AZURE_CONFIG_DIR` is set on the **child**, never on `mazet` itself. Your own
@@ -478,7 +478,7 @@ default → shared config**.
 |---|---|
 | `tenant` | no `--tenant` on the login; you pick your tenant as `az login` already lets you |
 | `subscription` | nothing is selected after login; `az`'s own default stands |
-| `cloud` | `AzureCloud` |
+| `cloud` | no `az cloud set` on the login, so the store keeps the cloud it already had; `mazet which` reports the default, `AzureCloud` |
 | `method` | `interactive` |
 | `default_env`, with several `[env.*]` and no selection | the top-level keys alone, and a warning naming the environments not chosen |
 | every key | the store is bound to this config's location and nothing else |
