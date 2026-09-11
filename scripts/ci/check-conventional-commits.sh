@@ -3,23 +3,23 @@
 # Verify a range's commit messages against cog.toml's conventional-commit rules.
 #
 # `cog check` does this in one call, and is what this would be if the
-# no-mistakes gate did not author commits of its own. It commits the fixes its
-# CI step writes under a subject baked into that binary — `no-mistakes: apply
-# CI fixes` — which is not a conventional commit and which no repository
-# setting can retemplate. `cog check` cannot exempt a single commit, so the
-# commit pushed to fix this check would fail it, and no further fix could land.
+# no-mistakes gate did not author commits of its own. It commits the fixes each
+# of its phases writes under a subject that binary templates itself —
+# `no-mistakes: <summary>` or `no-mistakes(<phase>): <summary>` — which is not a
+# conventional commit and which no repository setting can retemplate. `cog
+# check` cannot exempt a single commit, so the commit pushed to fix this check
+# would fail it, and no further fix could land.
 #
 # Every other commit is held to exactly what `cog check` enforced: `cog verify`
 # reads the same cog.toml, so the type and scope allowlists still apply, and
 # merge commits are skipped the way `ignore_merge_commits` skipped them.
 set -euo pipefail
 
-# Subjects the no-mistakes binary hardcodes for commits it authors itself.
-# Matched whole, so a hand-written message that merely mentions one is checked.
-GATE_SUBJECTS=(
-    "no-mistakes: apply CI fixes"
-    "no-mistakes: apply agent fixes"
-)
+# Commits the no-mistakes gate authors itself. Only the subject's type — and
+# its optional scope, which is the phase that wrote the fix — is fixed; the
+# summary after it varies per fix. Anchored at the start, so a hand-written
+# message that merely mentions the gate is still checked.
+GATE_SUBJECT='^no-mistakes(\([^)]+\))?: '
 
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=scripts/ci/borrowed-identity.sh
@@ -33,11 +33,9 @@ non_compliant=0
 
 while IFS= read -r sha; do
     subject=$(git log -1 --format=%s "$sha")
-    for gate_subject in "${GATE_SUBJECTS[@]}"; do
-        if [ "$subject" = "$gate_subject" ]; then
-            continue 2
-        fi
-    done
+    if [[ "$subject" =~ $GATE_SUBJECT ]]; then
+        continue
+    fi
 
     if ! report=$(git log -1 --format=%B "$sha" | cog verify --file - 2>&1); then
         printf 'Errored commit: %s\n\tCommit message: %s\n%s\n' \
