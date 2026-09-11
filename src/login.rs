@@ -135,6 +135,14 @@ impl Mode {
             Mode::ServicePrincipalSecret | Mode::ServicePrincipalCertificate | Mode::Federated
         )
     }
+
+    /// Whether this mode authenticates as a managed identity.
+    fn is_managed_identity(self) -> bool {
+        matches!(
+            self,
+            Mode::ManagedIdentitySystem | Mode::ManagedIdentityUserAssigned
+        )
+    }
 }
 
 /// Which `az` call a step is.
@@ -462,7 +470,17 @@ pub fn plan(
         }
     }
 
+    // `az login --identity` refuses to run alongside a tenant at all:
+    //
+    //     if any([password, service_principal, tenant]) and identity:
+    //         raise CLIError("usage error: '--identity' is not applicable
+    //                         with other arguments")
+    //
+    // (azure-cli 2.90.0, profile/custom.py). A managed identity is the host's,
+    // and its tenant comes with it — so a `.mazet` that names one is honoured
+    // everywhere else and simply does not reach this login.
     match &tenant {
+        _ if mode.is_managed_identity() => {}
         Some(value) => pair(&mut login, "--tenant", value.as_str()),
         // `az login --service-principal` refuses to run without one, so mazet
         // says so before spawning anything.
@@ -484,11 +502,16 @@ pub fn plan(
             pair(&mut login, "--subscription", value.as_str());
         }
     }
-    for scope in &options.scope {
-        pair(&mut login, "--scope", scope);
-    }
     if let Some(claims) = &options.claims_challenge {
         pair(&mut login, "--claims-challenge", claims);
+    }
+    // `--scope` is declared `nargs='+'` with no `append` action, so every
+    // scope goes in ONE flag: repeating the flag makes argparse keep the last
+    // occurrence and silently drop the rest. Last in the argv, because a
+    // greedy flag is safest with nothing after it.
+    if !options.scope.is_empty() {
+        login.push("--scope".to_string());
+        login.extend(options.scope.iter().cloned());
     }
     steps.push(Step {
         kind: StepKind::Login,

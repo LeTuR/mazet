@@ -6,7 +6,7 @@ use serde_json::json;
 use super::{select::SelectionArgs, CommandError, CommandOutput, Context};
 use crate::{
     az::{Az, Streams},
-    explain,
+    status,
 };
 
 /// The worked examples on `mazet logout --help`.
@@ -19,8 +19,10 @@ Examples:
 Only that one store is touched. Every other identity on this machine — and your
 own ~/.azure — is left logged in, which is the point of keeping them apart.
 
-A store that was never logged into is not an error: there was nothing to clear,
-and the command says so.";
+A store with nothing logged into it is not an error: there was nothing to clear,
+and the command says so. That includes a store you have already logged out of —
+`az logout` empties the account list rather than removing the file it keeps it
+in, so mazet reads the list rather than trusting the file's presence.";
 
 /// `mazet logout`.
 #[derive(Debug, Args)]
@@ -33,7 +35,7 @@ pub struct LogoutArgs {
 /// Run `mazet logout`.
 pub fn run(args: &LogoutArgs, ctx: &Context) -> Result<CommandOutput, CommandError> {
     let target = args.selection.resolve(ctx)?;
-    let had_login = explain::has_login(&target.store);
+    let had_login = status::holds_account(&target.store);
 
     let cleared = if had_login {
         let az = Az::discover().map_err(CommandError::from_error)?;
@@ -78,10 +80,8 @@ pub fn run(args: &LogoutArgs, ctx: &Context) -> Result<CommandOutput, CommandErr
         )
     } else {
         format!(
-            "nothing to clear\n\n  store    {}\n           no login has ever been made here \
-             (there is no {}).",
-            target.store.display(),
-            explain::LOGIN_MARKER
+            "nothing to clear\n\n  store    {}\n           no account is logged in there.",
+            target.store.display()
         )
     };
 

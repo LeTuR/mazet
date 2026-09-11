@@ -43,9 +43,47 @@ fn logging_out_clears_that_store_and_says_so() {
     assert_eq!(json["cleared"], true);
     assert!(sandbox.ran("logout"), "az logout was not run");
 
-    // And the store no longer holds one.
+    // And the store no longer holds one. `az logout` leaves the file behind
+    // with an empty account list rather than removing it, so the file being
+    // there is not the question — what is in it is.
     let store = std::path::PathBuf::from(json["store"].as_str().expect("a store"));
-    assert!(!store.join("azureProfile.json").exists());
+    assert!(
+        !sandbox.accounts_in(&store),
+        "the account is still in the store"
+    );
+}
+
+#[test]
+fn logging_out_twice_is_not_a_failure() {
+    let sandbox = Sandbox::new();
+    let tree = sandbox.subdir("tree");
+    sandbox.flat(&tree, &format!("tenant = \"{TENANT}\"\n"));
+
+    sandbox
+        .mazet_stubbed(&tree)
+        .args(["login", "--json"])
+        .output()
+        .expect("log in first");
+    sandbox
+        .mazet_stubbed(&tree)
+        .args(["logout", "--json"])
+        .output()
+        .expect("log out once");
+
+    // az does not remove azureProfile.json on logout; it rewrites it with the
+    // accounts that are left. Anything that took the file's presence for a
+    // login would run `az logout` again here, and az exits non-zero against a
+    // store with nothing in it.
+    let out = sandbox
+        .mazet_stubbed(&tree)
+        .args(["logout", "--json"])
+        .output()
+        .expect("log out twice");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "the second logout failed:\n{text}");
+    let json: serde_json::Value = serde_json::from_str(&text).expect("JSON");
+    assert_eq!(json["had_login"], false);
+    assert_eq!(json["cleared"], false);
 }
 
 #[test]
@@ -92,13 +130,9 @@ fn logging_out_of_one_profile_leaves_the_others_logged_in() {
         String::from_utf8_lossy(&out.stdout)
     );
 
-    assert!(!profile_store(&sandbox, "client-a")
-        .join("azureProfile.json")
-        .exists());
+    assert!(!sandbox.accounts_in(&profile_store(&sandbox, "client-a")));
     assert!(
-        profile_store(&sandbox, "client-b")
-            .join("azureProfile.json")
-            .exists(),
+        sandbox.accounts_in(&profile_store(&sandbox, "client-b")),
         "the other profile's login was cleared too"
     );
 }

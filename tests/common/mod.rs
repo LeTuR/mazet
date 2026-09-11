@@ -320,10 +320,19 @@ impl Sandbox {
         self.calls().iter().any(|call| call.verb() == verb)
     }
 
-    /// Give a store a login, the way the stub's `az login` would.
+    /// Give a store a login, in the envelope `az` keeps its account list in.
     pub fn plant_login(&self, store: &Path, account: &str) {
         std::fs::create_dir_all(store).expect("store");
-        std::fs::write(store.join("azureProfile.json"), account).expect("azureProfile.json");
+        std::fs::write(
+            store.join("azureProfile.json"),
+            format!(r#"{{"installationId":"test","subscriptions":[{account}]}}"#),
+        )
+        .expect("azureProfile.json");
+    }
+
+    /// The accounts a store currently holds, read the way `mazet` reads them.
+    pub fn accounts_in(&self, store: &Path) -> bool {
+        mazet::status::holds_account(store)
     }
 }
 

@@ -231,8 +231,16 @@ which credential the environment offers decides the rest:
 | managed identity, system | `method = "managed-identity"` | `az login --identity` |
 | managed identity, user-assigned | …and one of `--client-id`, `--object-id`, `--resource-id` | `az login --identity --client-id C` |
 
+A managed identity login carries **no tenant**, even when the `.mazet` declares
+one: `az` refuses `--identity` alongside a tenant outright, because a managed
+identity is the host's and its tenant comes with it. The declared tenant still
+applies everywhere else — it is what `mazet exec` exports as `ARM_TENANT_ID`,
+and it is part of what gives that store its own directory.
+
 `--allow-no-subscriptions` (tenant-level work, for `az ad`), `--scope`,
 `--claims-challenge` and `--skip-subscription-discovery` are passed through.
+`--scope` repeats, and every scope reaches `az` under one flag, because `az`
+declares it as a multi-value argument and would keep only the last of several.
 `--skip-subscription-discovery` requires a tenant — that is `az`'s own rule, and
 `mazet` says so before starting anything rather than letting `az` fail — and
 with a subscription it needs the **id**, not a display name.
@@ -292,6 +300,15 @@ the login is over. Argv is world-readable through `ps`; that file is not.
 Nothing `mazet` prints ever carries a credential either: it reports the **name**
 of the variable a login used, and never what was in it.
 
+A trailing newline is not part of the secret. `echo secret > secret.txt` leaves
+one behind, and a password sent with a `
+` on the end fails as a *wrong
+password*, with nothing in the error pointing at why — so `mazet` drops exactly
+one trailing line ending, writing its own private copy only when the file
+actually had one. `MAZET_CERTIFICATE` and `AZURE_CLIENT_CERTIFICATE_PATH` are
+exempt: `az` opens that path itself as a PEM, and a PEM ends in a newline by
+definition.
+
 ## Running things — `mazet exec` and `mazet env`
 
 ```sh
@@ -340,8 +357,11 @@ mazet status --all               # every store on this machine
 
 For each store: the directory, whether a login is present, and the tenant,
 subscription, cloud and identity that `az account show` reports inside it. A
-store that has never been logged into says so rather than failing — it is the
-state every store starts in. `--all` asks the stores at the same time and skips
+store with nothing logged into it says so rather than failing — it is the state
+every store starts in, and it is also the state `mazet logout` leaves behind. The
+two are reported apart, because `az logout` empties the account list in
+`azureProfile.json` rather than removing the file, so what is *in* that file is
+the answer and its presence is not. `--all` asks the stores at the same time and skips
 `az` entirely for the ones with no login, so ten profiles stay fast.
 
 ## Which `az`

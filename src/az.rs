@@ -113,7 +113,8 @@ pub enum Streams {
     /// What a login uses: the device code, the browser prompt and the consent
     /// question all go to stderr and have to reach the operator, while `az`'s
     /// subscription dump on stdout must not land in the middle of `mazet`'s
-    /// own document.
+    /// own document. [`Run::stderr`] is therefore empty for this variant —
+    /// the operator already saw it.
     Interactive,
     /// stdout and stderr captured, stdin closed.
     ///
@@ -173,14 +174,24 @@ impl Az {
         let mut command = Command::new(&self.program);
         command.args(args);
         command.env(AZURE_CONFIG_DIR, store);
+        // Every handle is set explicitly. `Command::output()` gives any handle
+        // left UNSET a pipe of its own, so an `Interactive` that only set
+        // stdout would silently capture stderr as well — and `az login
+        // --use-device-code` prints the code an operator has to type through
+        // `logger.warning`, which is stderr. That login would show nothing and
+        // appear to hang.
         match streams {
             Streams::Interactive => {
-                command.stdout(Stdio::piped());
+                command
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::inherit())
+                    .stdin(Stdio::inherit());
             }
             Streams::Captured => {
-                command.stdout(Stdio::piped());
-                command.stderr(Stdio::piped());
-                command.stdin(Stdio::null());
+                command
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .stdin(Stdio::null());
             }
         }
         let output = command.output().map_err(|source| AzError::Spawn {
@@ -453,15 +464,25 @@ impl Credentials {
                         detail: format!("no file at {}", path.display()),
                     });
                 }
-                Ok(Some(Credential {
-                    var,
-                    kind,
-                    token: token_for(kind, &path),
-                    _temp: None,
-                }))
+                match self.normalized(kind, var, &path)? {
+                    // The file is already exactly the credential: hand `az`
+                    // the operator's own path and write nothing.
+                    None => Ok(Some(Credential {
+                        var,
+                        kind,
+                        token: token_for(kind, &path),
+                        _temp: None,
+                    })),
+                    Some(temp) => Ok(Some(Credential {
+                        var,
+                        kind,
+                        token: token_for(kind, &temp.path),
+                        _temp: Some(temp),
+                    })),
+                }
             }
             Form::Value => {
-                let temp = TempSecret::write(&self.dir, var, value.as_bytes())?;
+                let temp = TempSecret::write(&self.dir, var, trim_eol(value.as_bytes()))?;
                 let token = token_for(kind, &temp.path);
                 Ok(Some(Credential {
                     var,
@@ -472,6 +493,46 @@ impl Credentials {
             }
         }
     }
+
+    /// A private copy of `path` without its trailing line ending, or `None`
+    /// when the file does not have one.
+    ///
+    /// `echo secret > secret.txt` leaves a newline behind, and `az` expands an
+    /// `@<path>` argument by reading the file — it does not own the question
+    /// of what in it is the credential. A password authenticated with a `\n`
+    /// on the end fails as a *wrong password*, with no diagnostic pointing at
+    /// the newline, so `mazet` settles it here rather than depending on what
+    /// the CLI happens to trim this release.
+    ///
+    /// `--certificate` is exempt: `az` opens that path itself as a PEM, and a
+    /// PEM ends with a newline by definition.
+    fn normalized(
+        &self,
+        kind: Kind,
+        var: &'static str,
+        path: &Path,
+    ) -> Result<Option<TempSecret>, AzError> {
+        if kind == Kind::Certificate {
+            return Ok(None);
+        }
+        let bytes = std::fs::read(path).map_err(|source| AzError::CredentialFile {
+            var,
+            path: path.to_path_buf(),
+            source,
+        })?;
+        let trimmed = trim_eol(&bytes);
+        if trimmed.len() == bytes.len() {
+            return Ok(None);
+        }
+        TempSecret::write(&self.dir, var, trimmed).map(Some)
+    }
+}
+
+/// Drop one trailing line ending, and no more: a credential is one line, and
+/// anything beyond that first `\n` was somebody's deliberate content.
+fn trim_eol(bytes: &[u8]) -> &[u8] {
+    let bytes = bytes.strip_suffix(b"\n").unwrap_or(bytes);
+    bytes.strip_suffix(b"\r").unwrap_or(bytes)
 }
 
 /// `--certificate` takes a path; `--password` and `--federated-token` take a

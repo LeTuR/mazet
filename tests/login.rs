@@ -617,3 +617,164 @@ fn the_parent_environment_and_the_operators_own_azure_are_untouched() {
         "mazet wrote into the operator's own ~/.azure"
     );
 }
+
+// ------------------------------------------- what the operator has to see
+
+#[test]
+fn what_az_writes_to_stderr_reaches_the_operator() {
+    let sandbox = Sandbox::new();
+    let tree = bound(&sandbox, "method = \"device-code\"\n");
+
+    // The device code is the whole point of a device-code login, and `az`
+    // prints it through `logger.warning` — stderr. A login that captured
+    // stderr would show the operator nothing and look like it had hung.
+    let out = sandbox
+        .mazet_stubbed(&tree)
+        .args(["login", "--json"])
+        .env(
+            "MAZET_STUB_STDERR",
+            "To sign in, use a web browser to open https://microsoft.com/devicelogin and enter CODE",
+        )
+        .output()
+        .expect("run mazet login");
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("devicelogin"),
+        "az's stderr was swallowed; the operator saw: {stderr:?}"
+    );
+    // ...and mazet's own document is still the only thing on stdout.
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        serde_json::from_str::<serde_json::Value>(&stdout).is_ok(),
+        "stdout is not one document: {stdout}"
+    );
+}
+
+// ------------------------------------------------- az's own argument rules
+
+#[test]
+fn a_managed_identity_login_never_carries_a_tenant() {
+    let sandbox = Sandbox::new();
+    // A tenant the config legitimately declares, and a managed identity.
+    let tree = bound(
+        &sandbox,
+        &format!("tenant = \"{TENANT}\"\nmethod = \"managed-identity\"\n"),
+    );
+
+    login(&sandbox, &tree, &[], &[]);
+
+    // az 2.90.0 refuses outright: `if any([password, service_principal,
+    // tenant]) and identity: raise CLIError("usage error: '--identity' is not
+    // applicable with other arguments")`.
+    let call = sandbox.call("login");
+    assert_eq!(call.argv(), ["login", "--identity"]);
+}
+
+#[test]
+fn a_managed_identity_login_never_carries_a_tenant_from_the_flag_either() {
+    let sandbox = Sandbox::new();
+    let tree = bound(&sandbox, "method = \"managed-identity\"\n");
+
+    login(&sandbox, &tree, &["--tenant", TENANT], &[]);
+
+    assert!(!sandbox.call("login").has("--tenant"));
+}
+
+#[test]
+fn every_scope_reaches_az_under_one_flag() {
+    let sandbox = Sandbox::new();
+    let tree = bound(&sandbox, &format!("tenant = \"{TENANT}\"\n"));
+
+    login(
+        &sandbox,
+        &tree,
+        &[
+            "--scope",
+            "https://graph.microsoft.com/.default",
+            "--scope",
+            "https://management.azure.com/.default",
+        ],
+        &[],
+    );
+
+    // `--scope` is declared nargs='+' with no append action, so a second
+    // `--scope` would replace the first rather than adding to it.
+    let argv = sandbox.call("login").argv();
+    let at = argv
+        .iter()
+        .position(|arg| arg == "--scope")
+        .expect("--scope");
+    assert_eq!(
+        argv.iter().filter(|arg| *arg == "--scope").count(),
+        1,
+        "{argv:?}"
+    );
+    assert_eq!(
+        &argv[at + 1..at + 3],
+        [
+            "https://graph.microsoft.com/.default",
+            "https://management.azure.com/.default"
+        ]
+    );
+}
+
+// ------------------------------------------------- the secret, exactly
+
+#[test]
+fn a_credential_file_written_by_echo_still_hands_az_the_right_secret() {
+    let sandbox = Sandbox::new();
+    let tree = bound(
+        &sandbox,
+        &format!("tenant = \"{TENANT}\"\nmethod = \"service-principal\"\n"),
+    );
+    // What `echo secret > secret.txt` leaves behind.
+    let file = sandbox.root().join("secret.txt");
+    std::fs::write(&file, "the-real-secret\n").expect("write the secret");
+
+    login(
+        &sandbox,
+        &tree,
+        &["--username", APP_ID],
+        &[("MAZET_PASSWORD_FILE", &file.display().to_string())],
+    );
+
+    // A trailing newline in the file is not part of the secret, and a password
+    // sent with one fails as a *wrong password* with nothing pointing at why.
+    assert_eq!(
+        sandbox
+            .call("login")
+            .credential_behind("--password")
+            .as_deref(),
+        Some("the-real-secret")
+    );
+}
+
+#[test]
+fn a_credential_file_that_is_already_exact_is_passed_as_it_stands() {
+    let sandbox = Sandbox::new();
+    let tree = bound(
+        &sandbox,
+        &format!("tenant = \"{TENANT}\"\nmethod = \"federated\"\n"),
+    );
+    let file = sandbox.root().join("oidc-token");
+    std::fs::write(&file, "header.payload.signature").expect("write the token");
+
+    login(
+        &sandbox,
+        &tree,
+        &["--username", APP_ID],
+        &[("MAZET_FEDERATED_TOKEN_FILE", &file.display().to_string())],
+    );
+
+    // Nothing to normalise, so no copy of the secret is written: az is handed
+    // the operator's own file.
+    let token = sandbox
+        .call("login")
+        .value_after("--federated-token")
+        .expect("--federated-token");
+    assert_eq!(
+        token.strip_prefix('@').map(std::path::PathBuf::from),
+        Some(file)
+    );
+}

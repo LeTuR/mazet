@@ -18,9 +18,8 @@ use serde_json::json;
 use super::{select::SelectionArgs, CommandError, CommandOutput, Context};
 use crate::{
     az::{Az, Streams},
-    explain,
     profile::{ProfileName, Registry},
-    status::{Account, SHOW_ARGS},
+    status::{self, Account, SHOW_ARGS},
 };
 
 /// The worked examples on `mazet status --help`.
@@ -148,15 +147,21 @@ fn probe_all(az: Option<&Az>, probes: &[Probe]) -> Vec<Report> {
 
 fn probe_one(az: Option<&Az>, probe: &Probe) -> Report {
     let exists = probe.store.is_dir();
-    let logged_in = explain::has_login(&probe.store);
+    let logged_in = status::holds_account(&probe.store);
     let mut account = None;
     let mut note = None;
 
     if !logged_in {
-        note = Some(format!(
-            "no login yet — az has written no {} here",
-            explain::LOGIN_MARKER
-        ));
+        // Told apart on purpose: `az logout` leaves the file behind with an
+        // empty account list, so "never used" and "logged out" look identical
+        // to anything that only checks whether it is there.
+        note = Some(
+            if probe.store.join(crate::explain::LOGIN_MARKER).is_file() {
+                "logged out — az cleared the account from this store".to_string()
+            } else {
+                "no login yet — nothing has ever logged in here".to_string()
+            },
+        );
     } else {
         match az {
             None => note = Some("az is not on PATH, so the login could not be read".to_string()),

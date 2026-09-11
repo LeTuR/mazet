@@ -209,3 +209,40 @@ fn a_store_az_refuses_to_read_is_reported_rather_than_fatal() {
     assert!(store["identity"].is_null());
     assert!(store["note"].as_str().is_some(), "{store}");
 }
+
+#[test]
+fn a_store_that_was_logged_out_of_is_told_apart_from_one_never_used() {
+    let sandbox = Sandbox::new();
+    let tree = sandbox.subdir("tree");
+    sandbox.flat(&tree, &format!("tenant = \"{TENANT}\"\n"));
+
+    sandbox
+        .mazet_stubbed(&tree)
+        .args(["login", "--json"])
+        .output()
+        .expect("log in");
+    sandbox
+        .mazet_stubbed(&tree)
+        .args(["logout", "--json"])
+        .output()
+        .expect("log out");
+
+    let out = sandbox
+        .mazet_stubbed(&tree)
+        .args(["status", "--json"])
+        .output()
+        .expect("run");
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).expect("JSON");
+    let store = &json["stores"][0];
+
+    // `az logout` leaves azureProfile.json behind with an empty account list,
+    // so the file's presence is not the answer — what is in it is.
+    assert_eq!(store["logged_in"], false);
+    assert!(
+        store["note"]
+            .as_str()
+            .expect("a note")
+            .contains("logged out"),
+        "{store}"
+    );
+}

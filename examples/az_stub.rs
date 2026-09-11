@@ -81,18 +81,25 @@ fn act(argv: &[String], store: &Path) {
                 )
             });
             let _ = std::fs::create_dir_all(store);
-            let _ = std::fs::write(profile_file(store), account);
+            let _ = std::fs::write(profile_file(store), wrap(&account));
         }
+        // As az does it: `Profile.logout` writes back the subscriptions that
+        // are left. It does NOT remove the file, and a second logout against
+        // an emptied store is an error there.
         ["logout", ..] => {
-            let _ = std::fs::remove_file(profile_file(store));
+            if accounts(store).is_empty() {
+                eprintln!("ERROR: There are no active accounts.");
+                std::process::exit(1);
+            }
+            let _ = std::fs::write(profile_file(store), r#"{"subscriptions":[]}"#);
         }
         ["cloud", "set", "-n", name] => {
             let _ = std::fs::create_dir_all(store);
             let _ = std::fs::write(store.join("cloud"), name);
         }
-        ["account", "show", ..] => match std::fs::read_to_string(profile_file(store)) {
-            Ok(text) => print!("{text}"),
-            Err(_) => {
+        ["account", "show", ..] => match accounts(store).first() {
+            Some(account) => print!("{account}"),
+            None => {
                 eprintln!("ERROR: Please run 'az login' to setup account.");
                 std::process::exit(1);
             }
@@ -102,6 +109,25 @@ fn act(argv: &[String], store: &Path) {
         }
         _ => {}
     }
+}
+
+/// The account list az keeps in `azureProfile.json`.
+fn accounts(store: &Path) -> Vec<String> {
+    let Ok(text) = std::fs::read_to_string(profile_file(store)) else {
+        return Vec::new();
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return Vec::new();
+    };
+    value["subscriptions"]
+        .as_array()
+        .map(|items| items.iter().map(ToString::to_string).collect())
+        .unwrap_or_default()
+}
+
+/// One account, in the envelope az stores it in.
+fn wrap(account: &str) -> String {
+    format!(r#"{{"installationId":"stub","subscriptions":[{account}]}}"#)
 }
 
 fn read_cloud(store: &Path) -> String {
