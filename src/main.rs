@@ -11,18 +11,27 @@ use mazet::cli::{self, Cli, CommandError, Context};
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    let format = cli::output::Format::resolve(cli.format.flags());
+    let flags = cli.format.flags();
 
     let result = Context::discover().and_then(|ctx| cli::run(&cli, &ctx));
 
     match result {
         Ok(out) => {
-            println!("{}", format.render(&out));
+            // Resolved against the output, not before it: `mazet hook <shell>`
+            // and `mazet hook resolve` are read down a pipe by a shell that
+            // wants the bytes, not TOON. See `CommandOutput::raw`.
+            println!(
+                "{}",
+                cli::output::Format::resolve_for(flags, &out).render(&out)
+            );
             ExitCode::SUCCESS
         }
         Err(err) => {
             // On stdout, and it is the one document this invocation printed.
-            println!("{}", cli::error_output(&err, format));
+            println!(
+                "{}",
+                cli::error_output(&err, cli::output::Format::resolve(flags))
+            );
             exit_code(&err)
         }
     }

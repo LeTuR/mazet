@@ -12,6 +12,9 @@
 //! agent, and TOON says the same thing in roughly 40% fewer tokens — AXI
 //! (`axi/1.0-2026-07`, <https://axi.md>) principle 1. `--json` is still exactly
 //! the bytes it always was, for a script that wants a record.
+//!
+//! The one exception is an output marked [`CommandOutput::raw`], whose human
+//! rendering is the payload — shell code headed for `eval`. See there.
 
 use std::io::IsTerminal;
 
@@ -46,6 +49,9 @@ pub struct AgentView {
     /// principle 5). Without it an empty list is a bare `[]`, which an agent
     /// cannot tell from a command that failed quietly.
     pub empty: Option<String>,
+    /// The human rendering *is* the payload — shell code to `eval`, or the one
+    /// path a shell hook captures with `$(...)`. See [`CommandOutput::raw`].
+    pub raw: bool,
 }
 
 impl CommandOutput {
@@ -78,6 +84,20 @@ impl CommandOutput {
     /// Say what a zero-result answer means, naming the context looked at.
     pub fn empty(mut self, message: impl Into<String>) -> Self {
         self.agent.empty = Some(message.into());
+        self
+    }
+
+    /// Mark the human rendering as the payload itself.
+    ///
+    /// The pipe default exists because what is on the other end of a pipe is
+    /// almost always an agent. For two outputs it is not: `mazet hook bash`
+    /// goes into `eval` and `mazet hook resolve` into `$(...)`, and both are
+    /// *always* read down a pipe. TOON there would be shell code the shell
+    /// cannot run. So a raw output ignores the pipe default — and nothing
+    /// else: an explicit `--json`, `--pretty` or `--toon` still wins, because
+    /// an agent that asked for a machine format asked on purpose.
+    pub fn raw(mut self) -> Self {
+        self.agent.raw = true;
         self
     }
 }
@@ -130,6 +150,16 @@ impl Format {
             Format::Human
         } else {
             Format::Toon
+        }
+    }
+
+    /// Resolve the format for an output that may be [`CommandOutput::raw`].
+    pub fn resolve_for(flags: FormatFlags, out: &CommandOutput) -> Self {
+        let format = Self::resolve(flags);
+        if out.agent.raw && format == Format::Toon && !flags.toon {
+            Format::Human
+        } else {
+            format
         }
     }
 

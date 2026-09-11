@@ -35,7 +35,9 @@ fn version_and_help_work() {
         .assert()
         .success()
         .stdout(contains("Examples:"))
-        .stdout(contains("mazet profile add client-a"));
+        .stdout(contains("mazet profile add client-a"))
+        .stdout(contains("mazet init"))
+        .stdout(contains("mazet which"));
 }
 
 #[test]
@@ -47,12 +49,20 @@ fn every_help_surface_carries_worked_examples() {
         vec!["profile", "add", "--help"],
         vec!["profile", "list", "--help"],
         vec!["profile", "rm", "--help"],
+        vec!["init", "--help"],
+        vec!["which", "--help"],
+        vec!["hook", "--help"],
+        vec!["hook", "bash", "--help"],
+        vec!["hook", "zsh", "--help"],
+        vec!["hook", "fish", "--help"],
+        vec!["hook", "powershell", "--help"],
+        vec!["hook", "resolve", "--help"],
     ] {
         let out = mazet(&sandbox).args(&args).output().unwrap();
         assert!(out.status.success(), "{args:?} must succeed");
         let text = stdout(&out);
         assert!(
-            text.contains("mazet profile") || text.contains("Examples:"),
+            text.contains("Examples:"),
             "`mazet {}` must show a worked example:\n{text}",
             args.join(" ")
         );

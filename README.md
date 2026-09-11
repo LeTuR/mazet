@@ -27,6 +27,9 @@ cargo install --git https://github.com/LeTuR/mazet
 ## Commands
 
 ```sh
+mazet init                     # bind this directory tree to a store of its own
+mazet which                    # which .mazet applies here, and what it resolves to
+mazet hook bash                # shell code that keeps AZURE_CONFIG_DIR in step
 mazet                          # what this machine knows about
 mazet profile add client-a     # register a profile with a store of its own
 mazet profile list             # name, store directory, and whether it exists yet
@@ -38,9 +41,146 @@ human-readable on a terminal and [TOON](https://github.com/toon-format/spec)
 down a pipe, every help surface carries worked examples, and errors say what to
 do next. Force a format with `--json`, `--pretty`, `--toon` or `--text`.
 
+The two `mazet hook` outputs are the exception to the pipe default: shell code
+for `eval`, and the single store path a hook captures with `$(...)`, stay raw
+down a pipe, because TOON there is something no shell can run. An explicit
+`--json`, `--pretty` or `--toon` still wins.
+
 Exit codes are `0` for success, `1` for a command that ran and failed, `2` for
-a usage error. A failure prints a structured `error`/`suggestion` document on
-**stdout**, so a caller never has to read two streams to find the answer.
+a usage error, and `3` for a directory that is bound to no `.mazet`. A failure
+prints a structured `error`/`suggestion` document on **stdout**, so a caller
+never has to read two streams to find the answer.
+
+`3` is its own code because the shell hook has to tell *"nothing is bound
+here"* from *"the binding is broken"* without parsing a message: on that
+distinction hangs whether it clears `AZURE_CONFIG_DIR` quietly or complains
+about a config.
+
+## Getting started
+
+```sh
+cd ~/work/client-a
+mazet init                     # writes .mazet, and .mazet.local into .gitignore
+mazet which                    # what this directory now resolves to
+```
+
+That is the whole minimum. `mazet init` with no flags writes a `.mazet` with
+no keys at all, which is valid: **its presence alone binds the tree to a store
+of its own.** `az login` under `~/work/client-a` is then a different login from
+`az login` under `~/work/client-b`, at the same time, with no re-login between
+them. Every flag below only narrows what happens inside that store.
+
+```sh
+mazet init --tenant contoso.onmicrosoft.com
+mazet init --tenant 00000000-0000-0000-0000-000000000000 \
+           --env dev=11111111-1111-1111-1111-111111111111 \
+           --env prod=22222222-2222-2222-2222-222222222222
+mazet init --local             # keep this folder's credentials inside it
+mazet init --force             # replace the .mazet that is already here
+```
+
+`--local` writes the `.mazet/` directory spelling with `store/` beside the
+config. Where your own credentials live is a per-operator choice, so it goes in
+`.mazet/local.toml` — gitignored — and not in the config your colleagues get.
+
+`init` never writes a credential, and never a `username` either: identity keys
+belong in the local layer, which is yours and is not committed.
+
+## Which identity applies here — `mazet which`
+
+`mazet which` is the debugging surface, and the one command that answers *"why
+am I this account?"*. It walks up from the current directory to the `.mazet`
+that applies — **the nearest one wins**, and the walk stops at the filesystem
+root — then prints what it resolved and, for every value, **whether that value
+was declared or defaulted, and which layer a declared one came from**.
+
+```console
+$ mazet which
+/home/me/work/infra/.mazet  (file spelling)
+
+  shared   /home/me/work/infra/.mazet
+  local    /home/me/work/infra/.mazet.local (found)
+
+  environment  prod             chosen by the --env flag
+               declared: dev, prod
+
+  FIELD         VALUE                                 WHERE
+  tenant        contoso.onmicrosoft.com               declared in /home/me/work/infra/.mazet
+  subscription  22222222-2222-2222-2222-222222222222  declared in /home/me/work/infra/.mazet [env.prod]
+  cloud         AzureCloud                            defaulted
+  method        interactive                           defaulted
+  identity      me@corp.com                           declared in /home/me/work/infra/.mazet.local
+
+  store    /home/me/.local/share/mazet/stores/contoso-onmicros-4b1e9f0a2c7d8e35
+           derived from the effective identity (key contoso-onmicros-4b1e9f0a2c7d8e35)
+           exists, holds a login
+```
+
+With every field optional, the value that surprises you is usually one nobody
+wrote down — so `defaulted` is as much of an answer as a path is. `mazet which
+--json` says the same thing to a script or an agent, and `mazet which --env
+<name>` answers as if that environment had been selected.
+
+Standing somewhere bound to nothing, `mazet which` says so and names every
+directory it looked in, so you can see where your `.mazet` actually is:
+
+```console
+$ cd /tmp && mazet which
+error: no .mazet in /tmp or any directory above it.
+  Searched 2 directories: /tmp, /. Run `mazet init` in the root of the tree you
+  want bound to its own Azure identity.
+```
+
+## The shell hook — bare `az`, no wrapper
+
+With the hook installed, `az` itself honours the directory. The hook re-resolves
+before every prompt and exports `AZURE_CONFIG_DIR` for the matched tree.
+
+| shell | line | file |
+|---|---|---|
+| bash | `eval "$(mazet hook bash)"` | `~/.bashrc` |
+| zsh | `eval "$(mazet hook zsh)"` | `~/.zshrc` |
+| fish | `mazet hook fish \| source` | `~/.config/fish/config.fish` |
+| PowerShell | `Invoke-Expression (& mazet hook powershell \| Out-String)` | `$PROFILE` |
+
+```console
+$ cd ~/work/infra          # a bound tree
+$ echo $AZURE_CONFIG_DIR
+/home/me/.local/share/mazet/stores/contoso-onmicros-4b1e9f0a2c7d8e35
+$ az account show          # speaks as the identity this tree declares
+
+$ cd ~/notes               # bound to nothing
+$ echo ${AZURE_CONFIG_DIR-unset}
+unset                      # ...and az is back to your own ~/.azure
+```
+
+**Leaving a bound tree clears the variable and puts back whatever the shell had
+before.** That is the property that matters: a hook which only ever *sets*
+`AZURE_CONFIG_DIR` carries the last directory's identity into an unrelated one,
+and `az` then runs against the wrong account with nothing on screen to say so.
+The same holds when a `.mazet` fails to parse — an answer `mazet` could not
+compute is never an answer to keep.
+
+The rest of what the hook guarantees:
+
+- **Fast.** One `mazet` call per prompt. No `az`, no network, no `jq`, and
+  nothing that reads the store's contents.
+- **Idempotent.** Evaluating it twice in one shell installs one hook.
+- **Inert when it cannot work.** With `mazet` off `PATH`, or a `.mazet` that
+  does not parse, the shell stays usable and the prompt keeps working; the
+  problem is reported once rather than before every command line.
+- **`$?` survives it**, so a prompt that shows the last exit status keeps
+  telling the truth.
+
+`MAZET_ENV` is respected, exactly as `--env` is: in a tree that declares an
+`[env.prod]` block, `MAZET_ENV=prod` picks it. A tree that declares no
+environment of that name reports the error instead of guessing — so set it per
+repository (or per command, as below) rather than exporting it for a whole
+shell.
+
+Under the hood the hook calls `mazet hook resolve`, which prints one line — the
+store — and nothing else. You do not normally run it yourself; `mazet which`
+answers the same question with the provenance of every value.
 
 ## The `.mazet` format
 
@@ -155,10 +295,110 @@ client secret, a certificate, a token — does not, and the parser refuses it
 rather than storing it. Those reach `az` from the environment at login time.
 
 **`mazet` holds paths and names; `az` holds secrets, in the directory `mazet`
-points it at.** A config is safe to commit; a store never is. When `mazet`
-creates a local store it writes `.mazet/.gitignore` covering `store/` and
-`local.toml`; for the flat spelling it adds `.mazet.local` to the tree's own
-`.gitignore`. A store directory is `0700` on Unix.
+points it at.** A config is safe to commit; a store never is. `mazet` writes
+the ignore rules the moment it puts anything beside a config — `mazet init`
+does it before any store exists: `.mazet/.gitignore` covering `store/` and
+`local.toml` for the directory spelling, and a `.mazet.local` entry in the
+tree's own `.gitignore` for the flat one. A store directory is `0700` on Unix.
+
+## A worked example: an infra repository
+
+Two subscriptions, one tenant, several engineers — the case the two layers
+exist for.
+
+```text
+infra/
+├── .mazet              # committed
+├── .mazet.local        # gitignored, one per engineer
+├── .gitignore
+└── modules/…
+```
+
+**`.mazet` — committed.** What the repository operates on, and nothing about
+who operates it:
+
+```toml
+tenant = "contoso.onmicrosoft.com"
+default_env = "dev"
+
+[env.dev]
+subscription = "11111111-1111-1111-1111-111111111111"
+
+[env.prod]
+subscription = "22222222-2222-2222-2222-222222222222"
+```
+
+```sh
+cd ~/work/infra
+mazet init --tenant contoso.onmicrosoft.com \
+           --env dev=11111111-1111-1111-1111-111111111111 \
+           --env prod=22222222-2222-2222-2222-222222222222
+git add .mazet .gitignore && git commit -m "chore: bind the repo to its tenant"
+```
+
+With more than one environment declared and nothing choosing between them, only
+the top-level keys apply — so `init` leaves a commented `default_env` line in
+the written file, **above** the `[env.*]` blocks, ready to uncomment:
+
+```toml
+# Pass --env <name>, set MAZET_ENV, or add:
+#   default_env = "dev"
+```
+
+It has to go above them: a bare key written after `[env.prod]` belongs to that
+table, and `mazet` refuses it as a key an `[env.*]` block does not have.
+
+`init` also puts `.mazet.local` into the repository's `.gitignore`, so the file
+you are about to write cannot be committed by accident.
+
+**`.mazet.local` — gitignored.** Who *you* are in that tenant. Each engineer
+writes their own, and nobody's is in the repository:
+
+```toml
+username = "me@corp.com"
+```
+
+An engineer with an admin account as well as their own writes that one in a
+second clone, or switches with `client_id`. An engineer who is only ever one
+identity in this tenant can skip the file entirely and put it once in the
+central registry instead — see [the registry](#where-mazet-keeps-things).
+
+**What that adds up to**, with the shell hook installed:
+
+```console
+$ cd ~/work/infra
+$ mazet which
+/home/me/work/infra/.mazet  (file spelling)
+
+  shared   /home/me/work/infra/.mazet
+  local    /home/me/work/infra/.mazet.local (found)
+
+  environment  dev              chosen by the config's `default_env`
+               declared: dev, prod
+
+  FIELD         VALUE                                 WHERE
+  tenant        contoso.onmicrosoft.com               declared in /home/me/work/infra/.mazet
+  subscription  11111111-1111-1111-1111-111111111111  declared in /home/me/work/infra/.mazet [env.dev]
+  cloud         AzureCloud                            defaulted
+  method        interactive                           defaulted
+  identity      me@corp.com                           declared in /home/me/work/infra/.mazet.local
+
+  store    /home/me/.local/share/mazet/stores/contoso-onmicros-65c846bf01371d08
+           derived from the effective identity (key contoso-onmicros-65c846bf01371d08)
+           exists, holds a login
+
+$ terraform apply                       # dev, as me@corp.com
+
+$ MAZET_ENV=prod terraform apply        # prod, its own store, its own login
+```
+
+`dev` and `prod` resolve to **different stores**, because one store holds
+exactly one active subscription: `az` marks one subscription `isDefault` inside
+`AZURE_CONFIG_DIR`, so a `terraform apply` against prod and an `az` query
+against dev out of one store would fight over which is active.
+
+Your colleague clones the same repository, writes their own `.mazet.local`, and
+gets their own two stores. The committed file never mentions either of you.
 
 ## Which store a command uses
 
@@ -210,9 +450,9 @@ username = "me@corp.com"
 
 ## Status
 
-The crate, the pipelines and the profile model are in place. `az` interaction
-(`login`, `logout`, `exec`, `env`, `status`) and directory resolution
-(`init`, `use`, walking up to find a `.mazet`, the shell hooks) are next.
+The crate, the pipelines, the profile model and directory resolution (`init`,
+`which`, the walk up to a `.mazet`, the shell hooks) are in place. `az`
+interaction — `login`, `logout`, `exec`, `env` and `status` — is next.
 
 ## Contributing
 
