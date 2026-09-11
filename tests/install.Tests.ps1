@@ -153,38 +153,38 @@ Describe 'Get-MazetExpectedChecksum' {
     }
 }
 
-Describe 'Add-MazetPathEntry' {
-    It 'appends a directory that is absent' {
-        Add-MazetPathEntry -ExistingPath 'C:\Windows;C:\Windows\System32' -Directory 'C:\tools\mazet' |
-            Should -Be 'C:\Windows;C:\Windows\System32;C:\tools\mazet'
+Describe 'Test-MazetOnPath' {
+    It 'reports a directory that is absent' {
+        Test-MazetOnPath -ExistingPath 'C:\Windows;C:\Windows\System32' -Directory 'C:\tools\mazet' |
+            Should -BeFalse
     }
 
-    It 'returns nothing when the directory is already there' {
-        Add-MazetPathEntry -ExistingPath 'C:\Windows;C:\tools\mazet' -Directory 'C:\tools\mazet' |
-            Should -BeNullOrEmpty
+    It 'reports a directory that is already there' {
+        Test-MazetOnPath -ExistingPath 'C:\Windows;C:\tools\mazet' -Directory 'C:\tools\mazet' |
+            Should -BeTrue
     }
 
     It 'treats a differently cased entry as the same directory' {
-        Add-MazetPathEntry -ExistingPath 'C:\Tools\Mazet' -Directory 'C:\tools\mazet' |
-            Should -BeNullOrEmpty
+        Test-MazetOnPath -ExistingPath 'C:\Tools\Mazet' -Directory 'C:\tools\mazet' |
+            Should -BeTrue
     }
 
     It 'treats a trailing separator as the same directory' {
-        Add-MazetPathEntry -ExistingPath 'C:\tools\mazet\' -Directory 'C:\tools\mazet' |
-            Should -BeNullOrEmpty
+        Test-MazetOnPath -ExistingPath 'C:\tools\mazet\' -Directory 'C:\tools\mazet' |
+            Should -BeTrue
     }
 
     It 'handles an empty PATH' {
-        Add-MazetPathEntry -ExistingPath '' -Directory 'C:\tools\mazet' | Should -Be 'C:\tools\mazet'
+        Test-MazetOnPath -ExistingPath '' -Directory 'C:\tools\mazet' | Should -BeFalse
     }
 
     It 'handles an unset PATH' {
-        Add-MazetPathEntry -ExistingPath $null -Directory 'C:\tools\mazet' | Should -Be 'C:\tools\mazet'
+        Test-MazetOnPath -ExistingPath $null -Directory 'C:\tools\mazet' | Should -BeFalse
     }
 
-    It 'drops the empty entries a trailing semicolon leaves' {
-        Add-MazetPathEntry -ExistingPath 'C:\Windows;;' -Directory 'C:\tools\mazet' |
-            Should -Be 'C:\Windows;C:\tools\mazet'
+    It 'does not match on the empty entries a trailing semicolon leaves' {
+        Test-MazetOnPath -ExistingPath 'C:\Windows;;' -Directory 'C:\tools\mazet' |
+            Should -BeFalse
     }
 }
 

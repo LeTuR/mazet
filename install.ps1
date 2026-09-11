@@ -5,9 +5,9 @@
 
 .DESCRIPTION
     Resolves the latest mazet release (or one you name), downloads the Windows
-    archive, verifies it against the release's SHA256 checksum file, extracts
-    mazet.exe into an install directory and puts that directory on the user
-    PATH.
+    archive, verifies it against the release's SHA256 checksum file and extracts
+    mazet.exe into an install directory, naming that directory and what to add
+    to PATH when it is not already there.
 
     The mirror of install.sh, which covers Linux and macOS. The five target
     triples, the archive names and the checksum file are
@@ -130,10 +130,9 @@ function Get-MazetExpectedChecksum {
 
 <#
 .SYNOPSIS
-    The PATH string a directory should be appended to, or $null when it is
-    already a component of it.
+    Whether a directory is already a component of a PATH string.
 #>
-function Add-MazetPathEntry {
+function Test-MazetOnPath {
     param([AllowNull()][string]$ExistingPath, [Parameter(Mandatory = $true)][string]$Directory)
 
     $entries = @()
@@ -141,12 +140,12 @@ function Add-MazetPathEntry {
         $entries = @($ExistingPath -split ';' | Where-Object { $_ -ne '' })
     }
     # Windows paths are case-insensitive, and a trailing separator names the
-    # same directory, so neither may count as a second entry.
+    # same directory, so neither may count as a different entry.
     $normalized = $Directory.TrimEnd('\', '/')
     foreach ($entry in $entries) {
-        if ($entry.TrimEnd('\', '/') -ieq $normalized) { return $null }
+        if ($entry.TrimEnd('\', '/') -ieq $normalized) { return $true }
     }
-    return (@($entries) + $Directory) -join ';'
+    return $false
 }
 
 # --- the world --------------------------------------------------------------
@@ -209,18 +208,6 @@ function Install-MazetBinary {
     return $target
 }
 
-function Add-MazetToUserPath {
-    param([Parameter(Mandatory = $true)][string]$Directory)
-
-    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-    $updated = Add-MazetPathEntry -ExistingPath $userPath -Directory $Directory
-    if ($null -eq $updated) { return $false }
-
-    [Environment]::SetEnvironmentVariable('Path', $updated, 'User')
-    $env:Path = "$env:Path;$Directory"
-    return $true
-}
-
 function Invoke-MazetInstall {
     Write-Host 'mazet installer'
 
@@ -270,8 +257,11 @@ function Invoke-MazetInstall {
     Write-Host ''
     Write-MazetOk "mazet $tag is installed at $installed"
 
-    if (Add-MazetToUserPath -Directory $InstallDir) {
-        Write-MazetWarn "$InstallDir was added to your user PATH; open a new terminal for it to take effect."
+    if (-not (Test-MazetOnPath -ExistingPath $env:Path -Directory $InstallDir)) {
+        Write-Host ''
+        Write-MazetWarn "$InstallDir is not on your PATH. Add it:"
+        Write-Host "    `$env:Path = `"$InstallDir;`$env:Path`""
+        Write-Host 'and put that line in your $PROFILE.'
     }
 
     Write-Host ''
