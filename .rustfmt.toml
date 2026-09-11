@@ -1,0 +1,10 @@
+# Stable options only: rustfmt silently warns (and ignores) on nightly-gated
+# keys, and a gate that prints seven warnings on every run trains people to
+# stop reading them.
+edition = "2021"
+max_width = 100
+hard_tabs = false
+tab_spaces = 4
+newline_style = "Auto"
+reorder_imports = true
+use_field_init_shorthand = true

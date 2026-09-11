@@ -1,0 +1,77 @@
+# Hooks for prek (https://github.com/j178/prek), not the Python `pre-commit`.
+#
+#   prek install          # once, to wire the git hooks
+#   prek run --all-files  # the gate, on demand
+#
+# Every hook is `language: system`: the toolchain is rust-toolchain.toml's and
+# the binaries are the ones CONTRIBUTING.md asks you to install, so a hook runs
+# exactly what CI runs rather than a copy prek built for itself.
+default_stages: [pre-commit]
+default_install_hook_types:
+  - commit-msg
+  - pre-commit
+  - pre-push
+repos:
+  - repo: local
+    hooks:
+      # Conventional commit validation (commit-msg stage)
+      - id: cocogitto-verify
+        name: Verify conventional commit message
+        entry: cog verify
+        language: system
+        stages: [commit-msg]
+        args: ["--file"]
+
+      - id: cargo-fmt
+        name: Cargo format check
+        entry: cargo fmt
+        language: system
+        types: [rust]
+        pass_filenames: false
+        # `--check`, or this hook reformats every file in the workspace
+        # including ones the developer did not stage — surprising, and not what
+        # its name says. Matches the CI job.
+        args: ["--all", "--", "--check"]
+
+      - id: cargo-clippy
+        name: Cargo clippy
+        entry: cargo clippy
+        language: system
+        types: [rust]
+        pass_filenames: false
+        args: ["--all-targets", "--all-features", "--", "-D", "warnings"]
+
+      - id: cargo-check
+        name: Cargo check
+        entry: cargo check
+        language: system
+        types: [rust]
+        pass_filenames: false
+        args: ["--all-targets", "--all-features"]
+
+      - id: cargo-test
+        name: Cargo test
+        entry: cargo test
+        language: system
+        types: [rust]
+        pass_filenames: false
+        args: ["--all-features"]
+
+      - id: cargo-doc
+        name: Cargo doc
+        entry: env RUSTDOCFLAGS=-Dwarnings cargo doc --no-deps --all-features
+        language: system
+        types: [rust]
+        pass_filenames: false
+        always_run: true
+
+      - id: cocogitto-check
+        name: Check commit history
+        # Not `cog check`: it cannot exempt the no-mistakes gate's own fix
+        # commits, whose subject that binary hardcodes. The script is what CI
+        # runs, and holds every other commit to the same cog.toml.
+        entry: scripts/ci/check-conventional-commits.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

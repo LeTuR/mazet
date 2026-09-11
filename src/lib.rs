@@ -1,0 +1,85 @@
+//! `mazet` — run `az` under several Azure identities at once, chosen by the
+//! directory you are standing in.
+//!
+//! The Azure CLI keeps every credential, token cache and its
+//! `azureProfile.json` under one directory, named by `AZURE_CONFIG_DIR` and
+//! defaulting to `~/.azure`. Two logins into that one directory compete: the
+//! second displaces the first. Giving each identity a directory of its own is
+//! the whole mechanism, and this crate is the part that decides *which*
+//! directory a given command should use.
+//!
+//! # The two bindings
+//!
+//! An identity is bound to work in one of two ways:
+//!
+//! 1. **A named profile** in a central registry — [`profile`]. Its store lives
+//!    under the user's data directory, and it is addressed by name.
+//! 2. **A folder-local binding**, declared by a `.mazet` at the root of a
+//!    directory tree — [`config`]. Either spelling is accepted: a `.mazet`
+//!    *file* holding TOML, or a `.mazet/` *directory* holding
+//!    `config.toml` and, optionally, its own `store/`.
+//!
+//! # The two layers
+//!
+//! A folder binding is two files, and which layer a key belongs in is the
+//! difference between a `.mazet` a team can commit and one that only works for
+//! the person who wrote it:
+//!
+//! - the **shared** layer (`.mazet`, or `.mazet/config.toml`) says what the
+//!   code operates on — tenant, subscription, cloud, a default method,
+//!   and any `[env.*]` blocks. It is meant to be committed.
+//! - the **local** layer (`.mazet.local`, or `.mazet/local.toml`) says who
+//!   *this* operator is — username or client id, which store to use, and a
+//!   method override. It is never committed.
+//!
+//! Finding a `username` in the shared layer is a warning, not an error: a
+//! repository with one operator is entitled to do it, but pinning the author's
+//! identity on everyone who clones the repository has to be said out loud. See
+//! [`config::Warning`].
+//!
+//! # No secrets, ever
+//!
+//! A tenant, a subscription, a cloud, a username and a client id are
+//! identifiers. Nothing that *authenticates* — a password, a client secret, a
+//! certificate, a token — may appear in any `mazet` file, and
+//! [`config::Config::load`] refuses one rather than storing it. Those reach
+//! `az` from the environment at login time. `mazet` holds paths and names; `az`
+//! holds secrets, in the directory `mazet` points it at.
+//!
+//! # Worked example
+//!
+//! ```no_run
+//! use std::path::Path;
+//!
+//! use mazet::{
+//!     config::{Config, EnvSelection},
+//!     paths::Paths,
+//!     profile::Registry,
+//!     resolve, store,
+//! };
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let paths = Paths::discover()?;
+//! let registry = Registry::load(&paths.registry_file())?;
+//!
+//! // Parse the binding declared by `./.mazet` (file or directory).
+//! let config = Config::load(Path::new(".mazet"))?;
+//!
+//! // Decide which AZURE_CONFIG_DIR it means, honouring `--env`/`MAZET_ENV`.
+//! let resolved = resolve::resolve(&config, &EnvSelection::from_env(None), &registry, &paths)?;
+//!
+//! // Create it, private to this user, before handing it to `az`.
+//! store::ensure_dir(&resolved.store)?;
+//! println!("AZURE_CONFIG_DIR={}", resolved.store.display());
+//! # Ok(())
+//! # }
+//! ```
+
+#![deny(missing_docs)]
+
+pub mod cli;
+pub mod config;
+pub mod paths;
+pub mod profile;
+pub mod resolve;
+pub mod store;

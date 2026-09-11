@@ -1,0 +1,51 @@
+[package]
+name = "mazet"
+version = "0.1.0"
+edition = "2021"
+# MSRV, declared in three places that have to agree: here (what cargo
+# enforces), `clippy.toml` (what clippy lints against) and CONTRIBUTING.md
+# (what a contributor reads). 1.85 is the floor clap 4.6 and toml 1.1 impose;
+# nothing in this crate needs anything newer.
+rust-version = "1.85"
+authors = ["LeTuR <magicletur@protonmail.com>"]
+license = "MIT"
+description = "Run az under several Azure identities at once, chosen by the directory you are standing in"
+repository = "https://github.com/LeTuR/mazet"
+keywords = ["azure", "az", "cli", "authentication", "profiles"]
+categories = ["command-line-utilities"]
+
+[[bin]]
+name = "mazet"
+path = "src/main.rs"
+
+[dependencies]
+# CLI. `derive` so the subcommand tree is the type, and another change can add
+# a variant without touching a dispatch table by hand.
+clap = { version = "4.6", features = ["derive"] }
+
+# Per-platform data/config directories. The store layout has to be right on
+# Linux, macOS and Windows, and this is the crate that knows where those are.
+directories = "6"
+
+# The config formats: `.mazet` and the registry are TOML, the machine-readable
+# output modes are JSON and TOON.
+serde = { version = "1", features = ["derive"] }
+toml = "1.1"
+serde_json = "1"
+
+# TOON is what AXI asks an agent-facing CLI to speak (principle 1). Default
+# features off: they pull a whole TUI viewer (ratatui, crossterm, syntect) that
+# this crate has no use for. Without them the tree is indexmap + serde.
+toon-format = { version = "0.5", default-features = false }
+
+thiserror = "2"
+
+[dev-dependencies]
+assert_cmd = "2.2"
+predicates = "3.1"
+tempfile = "3"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1

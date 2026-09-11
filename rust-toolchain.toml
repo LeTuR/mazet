@@ -1,0 +1,12 @@
+[toolchain]
+# Stable, not the MSRV. The MSRV (Cargo.toml `rust-version`, clippy.toml `msrv`)
+# is the floor a consumer needs; this is the toolchain the repo develops and
+# gates against, and pinning it to the floor would mean losing every lint and
+# diagnostic newer than it.
+channel = "stable"
+
+# rustfmt and clippy are the gate; rust-src is what rust-analyzer needs to
+# resolve into the standard library.
+components = ["rustfmt", "clippy", "rust-src"]
+
+profile = "default"
