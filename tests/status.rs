@@ -246,3 +246,49 @@ fn a_store_that_was_logged_out_of_is_told_apart_from_one_never_used() {
         "{store}"
     );
 }
+
+#[test]
+fn the_human_block_separates_every_label_from_its_value() {
+    let sandbox = Sandbox::new();
+    register(&sandbox, "client-a");
+    sandbox.plant_login(&profile_store(&sandbox, "client-a"), ACCOUNT);
+
+    let out = sandbox
+        .mazet_stubbed(&sandbox.tree())
+        .args(["status", "--profile", "client-a", "--text"])
+        .output()
+        .expect("run mazet status");
+    let text = String::from_utf8_lossy(&out.stdout).to_string();
+    assert!(out.status.success(), "{text}");
+
+    // Every detail line is `  <label><padding><value>`: no label may run into
+    // its value, and the whole block lines its values up in one column.
+    let mut columns: Vec<(&str, usize)> = Vec::new();
+    for label in [
+        "store",
+        "login",
+        "identity",
+        "tenant",
+        "subscription",
+        "cloud",
+        "state",
+    ] {
+        let line = text
+            .lines()
+            .find(|line| line.trim_start().starts_with(label))
+            .unwrap_or_else(|| panic!("no `{label}` line in:\n{text}"));
+        let rest = &line[line.find(label).expect("the label") + label.len()..];
+        let padding = rest.chars().take_while(|c| *c == ' ').count();
+        assert!(padding > 0, "`{label}` runs into its value: `{line}`");
+        assert!(
+            !rest.trim().is_empty(),
+            "`{label}` has no value: `{line}`"
+        );
+        columns.push((label, line.find(label).expect("the label") + label.len() + padding));
+    }
+
+    let (_, first) = columns[0];
+    for (label, at) in &columns {
+        assert_eq!(*at, first, "`{label}` starts its value elsewhere:\n{text}");
+    }
+}

@@ -241,13 +241,13 @@ fn render(reports: &[Report], all: bool, az_missing: bool) -> CommandOutput {
     let mut human = String::new();
     for report in reports {
         human.push_str(&format!(
-            "{}\n  store      {}\n",
+            "{}\n  store        {}\n",
             report.name,
             report.store.display()
         ));
         match &report.account {
             Some(account) => {
-                human.push_str("  login      present\n");
+                human.push_str("  login        present\n");
                 push_field(&mut human, "identity", account.identity());
                 push_field(&mut human, "tenant", account.tenant_id.clone());
                 push_field(
@@ -264,7 +264,7 @@ fn render(reports: &[Report], all: bool, az_missing: bool) -> CommandOutput {
             }
             None => {
                 human.push_str(&format!(
-                    "  login      {}\n",
+                    "  login        {}\n",
                     report.note.as_deref().unwrap_or("none")
                 ));
             }
@@ -305,6 +305,6 @@ fn render(reports: &[Report], all: bool, az_missing: bool) -> CommandOutput {
 
 fn push_field(human: &mut String, label: &str, value: Option<String>) {
     if let Some(value) = value {
-        human.push_str(&format!("  {label:<11}{value}\n"));
+        human.push_str(&format!("  {label:<13}{value}\n"));
     }
 }
