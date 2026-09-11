@@ -15,15 +15,40 @@ use tempfile::TempDir;
 /// a `.mazet` in.
 pub struct Sandbox {
     root: TempDir,
+    real_root: PathBuf,
     paths: Paths,
+}
+
+/// The directory as the operating system reports it to a process standing in
+/// it. macOS hands out `/var/folders/...` temporary directories that are
+/// symlinks to `/private/var/folders/...`, and a child process run with
+/// `current_dir` there reports the resolved form, so a test comparing what
+/// `mazet` printed against a path it built itself must hold the resolved form
+/// too.
+#[cfg(not(windows))]
+fn real_path(path: &Path) -> PathBuf {
+    path.canonicalize().expect("resolve the sandbox root")
+}
+
+/// Windows temporary directories are not symlinks, and `canonicalize` there
+/// returns a `\\?\` verbatim path, which is not the spelling a process
+/// reports, so the path is already the one to hold.
+#[cfg(windows)]
+fn real_path(path: &Path) -> PathBuf {
+    path.to_path_buf()
 }
 
 impl Sandbox {
     pub fn new() -> Self {
         let root = TempDir::new().expect("temp dir");
-        let paths = Paths::new(root.path().join("data"), root.path().join("config"));
-        std::fs::create_dir_all(root.path().join("tree")).expect("tree");
-        Self { root, paths }
+        let real_root = real_path(root.path());
+        let paths = Paths::new(real_root.join("data"), real_root.join("config"));
+        std::fs::create_dir_all(real_root.join("tree")).expect("tree");
+        Self {
+            root,
+            real_root,
+            paths,
+        }
     }
 
     pub fn paths(&self) -> &Paths {
@@ -32,12 +57,12 @@ impl Sandbox {
 
     /// The working tree a `.mazet` goes in.
     pub fn tree(&self) -> PathBuf {
-        self.root.path().join("tree")
+        self.real_root.join("tree")
     }
 
     /// A second working tree, for the "two clones of one repository" cases.
     pub fn other_tree(&self) -> PathBuf {
-        let path = self.root.path().join("other");
+        let path = self.real_root.join("other");
         std::fs::create_dir_all(&path).expect("other tree");
         path
     }
@@ -77,12 +102,17 @@ impl Sandbox {
 
     /// The sandbox root, for a test that needs directories of its own.
     pub fn root(&self) -> &Path {
-        self.root.path()
+        &self.real_root
     }
 
     /// A directory under the sandbox root, created on demand.
+    /// `relative` is spelled with `/`, which is not a separator on Windows, so
+    /// it is pushed one component at a time rather than joined whole.
     pub fn subdir(&self, relative: &str) -> PathBuf {
-        let path = self.root.path().join(relative);
+        let mut path = self.real_root.clone();
+        for component in relative.split('/') {
+            path.push(component);
+        }
         std::fs::create_dir_all(&path).expect("create dir");
         path
     }
