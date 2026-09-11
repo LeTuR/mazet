@@ -17,7 +17,10 @@
 //! 2. **A folder-local binding**, declared by a `.mazet` at the root of a
 //!    directory tree — [`config`]. Either spelling is accepted: a `.mazet`
 //!    *file* holding TOML, or a `.mazet/` *directory* holding
-//!    `config.toml` and, optionally, its own `store/`.
+//!    `config.toml` and, optionally, its own `store/`. [`discover`] is what
+//!    finds it: it walks up from the current directory, and the nearest one
+//!    wins. [`init`] writes one; [`explain`] says where each effective value
+//!    came from; [`hook`] keeps a shell's `AZURE_CONFIG_DIR` in step with it.
 //!
 //! # The two layers
 //!
@@ -49,10 +52,9 @@
 //! # Worked example
 //!
 //! ```no_run
-//! use std::path::Path;
-//!
 //! use mazet::{
 //!     config::{Config, EnvSelection},
+//!     discover,
 //!     paths::Paths,
 //!     profile::Registry,
 //!     resolve, store,
@@ -62,8 +64,9 @@
 //! let paths = Paths::discover()?;
 //! let registry = Registry::load(&paths.registry_file())?;
 //!
-//! // Parse the binding declared by `./.mazet` (file or directory).
-//! let config = Config::load(Path::new(".mazet"))?;
+//! // Walk up from here to the `.mazet` that applies, and parse both layers.
+//! let found = discover::find(&std::env::current_dir()?)?;
+//! let config = Config::load(found.location.path())?;
 //!
 //! // Decide which AZURE_CONFIG_DIR it means, honouring `--env`/`MAZET_ENV`.
 //! let resolved = resolve::resolve(&config, &EnvSelection::from_env(None), &registry, &paths)?;
@@ -79,6 +82,10 @@
 
 pub mod cli;
 pub mod config;
+pub mod discover;
+pub mod explain;
+pub mod hook;
+pub mod init;
 pub mod paths;
 pub mod profile;
 pub mod resolve;

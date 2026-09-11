@@ -30,8 +30,11 @@ use clap::{Args, Parser, Subcommand};
 use crate::paths::Paths;
 
 pub mod home;
+pub mod hook_cmd;
+pub mod init_cmd;
 pub mod output;
 pub mod profile_cmd;
+pub mod which_cmd;
 
 use output::{CommandOutput, Format, FormatFlags};
 
@@ -40,17 +43,29 @@ pub const EXIT_ERROR: i32 = 1;
 /// The invocation was wrong: an unknown flag, a missing argument, a bad value.
 /// clap exits with this on its own; it is named here so a command can too.
 pub const EXIT_USAGE: i32 = 2;
+/// The current directory is bound to no `.mazet`.
+///
+/// Not a failure of the command — the question was answered — but the shell
+/// hook has to tell "no binding here" apart from "the binding is broken"
+/// without parsing a message, because on that distinction hangs whether it
+/// clears `AZURE_CONFIG_DIR` quietly or complains about a config.
+pub const EXIT_UNBOUND: i32 = 3;
 
 const EXAMPLES: &str = "\
 Examples:
+  mazet init                         bind this directory tree to a store of its own
+  mazet which                        which .mazet applies here, and what it resolves to
+  eval \"$(mazet hook bash)\"          make bare az honour the directory, every prompt
   mazet                              show the registered profiles and where they live
   mazet profile add client-a         register a profile with a store of its own
   mazet profile list                 name, store directory, and whether it exists yet
-  mazet profile list --json          the same, as JSON, for a script
   mazet profile rm client-a          unregister it (the store directory is kept)
 
 Output is human-readable on a terminal and TOON down a pipe. Force it with
---json, --pretty, --toon or --text.";
+--json, --pretty, --toon or --text.
+
+Exit codes: 0 success, 1 the command ran and failed, 2 a usage error,
+3 this directory is bound to no .mazet.";
 
 /// Run `az` under several Azure identities at once, chosen by the directory
 /// you are standing in.
@@ -124,6 +139,56 @@ pub enum Command {
         /// Which profile operation.
         #[command(subcommand)]
         command: profile_cmd::ProfileCommand,
+    },
+
+    /// Write a .mazet in the current directory.
+    #[command(
+        after_help = init_cmd::INIT_EXAMPLES,
+        after_long_help = init_cmd::INIT_EXAMPLES
+    )]
+    Init {
+        /// The Entra tenant this tree operates in: a GUID or a verified domain.
+        #[arg(long, value_name = "GUID|DOMAIN")]
+        tenant: Option<String>,
+        /// The subscription to select after login: a GUID or a display name.
+        #[arg(long, value_name = "GUID|NAME")]
+        subscription: Option<String>,
+        /// The registered az cloud. One of AzureCloud, AzureChinaCloud,
+        /// AzureUSGovernment, AzureGermanCloud, AzureBleuCloud.
+        #[arg(long, value_name = "NAME")]
+        cloud: Option<String>,
+        /// An `[env.<name>]` block. Repeat for each environment.
+        #[arg(long = "env", value_name = "NAME=SUBSCRIPTION")]
+        envs: Vec<String>,
+        /// Write the .mazet/ directory spelling, with this folder's own store
+        /// beside the config.
+        #[arg(long)]
+        local: bool,
+        /// Replace the .mazet that is already here.
+        #[arg(long)]
+        force: bool,
+    },
+
+    /// Explain which .mazet applies here, and what it resolves to.
+    #[command(
+        after_help = which_cmd::WHICH_EXAMPLES,
+        after_long_help = which_cmd::WHICH_EXAMPLES
+    )]
+    Which {
+        /// Answer as if this environment had been selected.
+        #[arg(long, value_name = "NAME")]
+        env: Option<String>,
+    },
+
+    /// Print shell code that keeps AZURE_CONFIG_DIR in step with the directory.
+    #[command(
+        after_help = hook_cmd::HOOK_EXAMPLES,
+        after_long_help = hook_cmd::HOOK_EXAMPLES
+    )]
+    Hook {
+        /// Which shell, or `resolve` — the call the hook itself makes.
+        #[command(subcommand)]
+        command: hook_cmd::HookCommand,
     },
 }
 
@@ -205,6 +270,24 @@ pub fn dispatch(command: Option<&Command>, ctx: &Context) -> Result<CommandOutpu
     match command {
         None => home::run(ctx),
         Some(Command::Profile { command }) => profile_cmd::run(command, ctx),
+        Some(Command::Init {
+            tenant,
+            subscription,
+            cloud,
+            envs,
+            local,
+            force,
+        }) => init_cmd::run(
+            tenant.as_deref(),
+            subscription.as_deref(),
+            cloud.as_deref(),
+            envs,
+            *local,
+            *force,
+            ctx,
+        ),
+        Some(Command::Which { env }) => which_cmd::run(env.clone(), ctx),
+        Some(Command::Hook { command }) => hook_cmd::run(command, ctx),
     }
 }
 

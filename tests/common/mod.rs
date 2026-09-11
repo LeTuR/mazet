@@ -75,6 +75,35 @@ impl Sandbox {
         std::fs::write(mazet_dir.join("local.toml"), local).expect("write local.toml");
     }
 
+    /// The sandbox root, for a test that needs directories of its own.
+    pub fn root(&self) -> &Path {
+        self.root.path()
+    }
+
+    /// A directory under the sandbox root, created on demand.
+    pub fn subdir(&self, relative: &str) -> PathBuf {
+        let path = self.root.path().join(relative);
+        std::fs::create_dir_all(&path).expect("create dir");
+        path
+    }
+
+    /// `mazet`, run from `dir`, pointed at this throwaway machine.
+    ///
+    /// `MAZET_ENV` and `AZURE_CONFIG_DIR` are removed rather than left to the
+    /// developer's own shell: both change what these commands answer, and a
+    /// suite whose result depends on who ran it proves nothing.
+    pub fn mazet(&self, dir: &Path) -> std::process::Command {
+        use assert_cmd::prelude::*;
+
+        let mut cmd = std::process::Command::cargo_bin("mazet").expect("the binary is built");
+        cmd.current_dir(dir)
+            .env("MAZET_DATA_DIR", self.paths.data_dir())
+            .env("MAZET_CONFIG_DIR", self.paths.config_dir())
+            .env_remove("MAZET_ENV")
+            .env_remove("AZURE_CONFIG_DIR");
+        cmd
+    }
+
     /// Write the central registry.
     pub fn registry(&self, contents: &str) {
         let file = self.paths.registry_file();
