@@ -35,6 +35,38 @@ ignore_patterns:
 auto_fix:
   review: 0
 
+# House rules a reviewer reading only the diff would not know, scoped to the
+# paths a change actually touches.
+review:
+  path_instructions:
+    - path: "install.*"
+      instructions: |
+        The two installers are a mirrored pair - install.sh for Linux and
+        macOS, install.ps1 for Windows - and each is fetched and piped straight
+        into a shell, so a break here is a break in the one-line install
+        README.md documents rather than something a user can work around.
+
+        install.sh is deliberately POSIX sh, not bash: it is run as
+        `curl ... | sh`. Keep it to standard tools (curl/wget, tar,
+        sha256sum/shasum), non-interactive, cleaning up through its trap, and
+        free of `local`, which is not POSIX and which this repository carries
+        no .shellcheckrc to excuse.
+
+        install.ps1 is PowerShell 5.1+ and its source must stay ASCII-only,
+        because that is what survives `irm | iex` decoding on Windows
+        PowerShell 5.1. Write-Host for output is intentional and not a lint to
+        fix - Write-Output would leak into the iex pipeline.
+
+        Both guard their entry point behind an environment variable
+        (MAZET_INSTALL_TEST, MAZET_PS_TEST) so the pure helpers can be reached
+        without performing an install, and both are tested: tests/install.bats
+        (bats-core) and tests/install.Tests.ps1 (Pester 5+), each run by its
+        own CI job. A change to either should move its suite.
+
+        The five target triples, the archive names and the checksum file are
+        .github/workflows/cd.yml's output and are the contract between the two.
+        A mismatch is a bug in one side, not licence to change both.
+
 # ci.yml sets `cancel-in-progress: true`, so a cancelled check here almost
 # always means a newer push superseded it rather than provider flakiness.
 # Rerunning would restart work that was stopped on purpose.
