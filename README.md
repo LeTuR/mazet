@@ -13,10 +13,31 @@ time, with no re-login between them.
 
 ## Install
 
-Download the archive for your platform from the
+Linux and macOS:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/LeTuR/mazet/main/install.sh | sh
+```
+
+Windows:
+
+```powershell
+irm https://raw.githubusercontent.com/LeTuR/mazet/main/install.ps1 | iex
+```
+
+Either one detects your platform, **verifies the download against the release's
+`sha256` checksum file before unpacking it**, and puts `mazet` in
+`~/.local/bin` — `%LOCALAPPDATA%\Programs\mazet` on Windows — naming the
+directory and what to add to `PATH` if it is not already there. An architecture
+with no build is refused by name rather than guessed at. Pin a version with
+`MAZET_VERSION=v0.3.0` or choose a directory with `MAZET_INSTALL_DIR`; the rest
+of the knobs are in [`docs/RELEASING.md`](docs/RELEASING.md).
+
+Or take the archive for your platform from the
 [releases page](https://github.com/LeTuR/mazet/releases) and put `mazet` on
-your `PATH`. Archives are published for Linux (x86-64, arm64), macOS (Intel,
-Apple silicon) and Windows (x86-64), with a `sha256` checksum file beside them.
+your `PATH` yourself. Archives are published for Linux (x86-64, arm64), macOS
+(Intel, Apple silicon) and Windows (x86-64), with a `sha256` checksum file
+beside them.
 
 From source, with Rust 1.85 or newer:
 
@@ -456,8 +477,9 @@ interaction — `login`, `logout`, `exec`, `env` and `status` — is next.
 
 ## Contributing
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md). The remote takes **rebase merges
-only**.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md). The remote takes **squash merges
+only**, so the pull request title is the commit that lands — and, per
+[`docs/RELEASING.md`](docs/RELEASING.md), the version it cuts.
 
 ## License
 

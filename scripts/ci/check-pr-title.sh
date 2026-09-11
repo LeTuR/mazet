@@ -2,10 +2,10 @@
 #
 # Verify a pull request title is a conventional commit.
 #
-# The remote takes rebase merges only, so the PR title is not itself a commit —
-# but it is what the release notes quote and what a reviewer reads first, and
-# holding it to cog.toml keeps it in the same vocabulary as the commits under
-# it. Nothing else checks it: the sibling script walks commits, not titles.
+# The remote takes squash merges only, so the PR title IS the commit that lands
+# on main: it is what the release notes quote, what a reviewer reads first, and
+# what release.yml's `cog bump --auto` reads to decide the next version.
+# Nothing else checks it: the sibling script walks commits, not titles.
 #
 # Usage: check-pr-title.sh <title>
 set -euo pipefail
