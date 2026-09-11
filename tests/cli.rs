@@ -236,3 +236,50 @@ fn a_malformed_tenant_note_is_refused_at_registration() {
     let json: serde_json::Value = serde_json::from_str(&stdout(&listed)).unwrap();
     assert_eq!(json["total"], 0);
 }
+
+#[test]
+fn the_profile_parent_help_carries_worked_examples() {
+    let sandbox = Sandbox::new();
+    let text = stdout(
+        &mazet(&sandbox)
+            .args(["profile", "--help"])
+            .output()
+            .unwrap(),
+    );
+    assert!(text.contains("Examples:"), "{text}");
+    assert!(text.contains("mazet profile add client-a"), "{text}");
+}
+
+#[test]
+fn an_error_suggestion_is_one_run_of_prose() {
+    // A suggestion assembled from a wrapped source literal used to arrive with
+    // the wrap's indentation baked into it.
+    let sandbox = Sandbox::new();
+    let out = mazet(&sandbox)
+        .args(["profile", "add", "a", "--tenant", "bogus", "--json"])
+        .output()
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_str(&stdout(&out)).unwrap();
+    let suggestion = json["suggestion"].as_str().unwrap();
+    assert!(
+        !suggestion.contains("  "),
+        "no run of spaces inside a suggestion: {suggestion:?}"
+    );
+    assert!(
+        suggestion.contains("contoso.onmicrosoft.com"),
+        "{suggestion}"
+    );
+
+    let text = stdout(
+        &mazet(&sandbox)
+            .args(["profile", "add", "a", "--tenant", "bogus", "--text"])
+            .output()
+            .unwrap(),
+    );
+    for line in text.lines() {
+        assert!(
+            !line.trim().contains("  "),
+            "no run of spaces inside the human rendering: {line:?}"
+        );
+    }
+}

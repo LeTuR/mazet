@@ -116,6 +116,10 @@ impl FormatArgs {
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Add, list and remove named profiles.
+    #[command(
+        after_help = profile_cmd::PROFILE_EXAMPLES,
+        after_long_help = profile_cmd::PROFILE_EXAMPLES
+    )]
     Profile {
         /// Which profile operation.
         #[command(subcommand)]

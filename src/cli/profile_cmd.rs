@@ -37,6 +37,18 @@ The store directory is left on disk: it holds credentials, and deleting it is
 not something to do behind your back. The output names it so you can remove it
 yourself.";
 
+/// The worked examples on `mazet profile --help` itself. The parent command
+/// is a help surface like any other: an agent that runs it and gets only a
+/// list of subcommand names has to guess at the next call.
+pub const PROFILE_EXAMPLES: &str = "\
+Examples:
+  mazet profile add client-a     register a profile with a store of its own
+  mazet profile list             name, store directory, and whether it exists yet
+  mazet profile list --json      the same, as JSON, for a script
+  mazet profile rm client-a      unregister it (the store directory is kept)
+
+A profile's store is created by az at first login, not by `add`.";
+
 /// Which profile operation.
 #[derive(Debug, Subcommand)]
 pub enum ProfileCommand {
@@ -79,8 +91,11 @@ fn add(name: &str, tenant: Option<&str>, ctx: &Context) -> Result<CommandOutput,
             Tenant::parse(raw).ok_or_else(|| CommandError {
                 message: format!("`{raw}` is not a tenant id or a domain"),
                 suggestion: Some(
-                    "Use the tenant's GUID, or a verified domain such as                      contoso.onmicrosoft.com."
-                        .into(),
+                    concat!(
+                        "Use the tenant's GUID, or a verified domain such as ",
+                        "contoso.onmicrosoft.com."
+                    )
+                    .into(),
                 ),
                 exit_code: super::EXIT_ERROR,
             })

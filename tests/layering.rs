@@ -468,3 +468,114 @@ fn a_shared_layer_profile_error_names_the_shared_file() {
         "the error must name the file the key is actually in: {rendered}"
     );
 }
+
+#[test]
+fn one_tenant_written_in_two_letter_cases_is_one_tenant() {
+    // A tenant is case-insensitive to Entra. If it were not canonicalized
+    // here, the same tenant written two ways would derive two stores AND miss
+    // the registry's identity default — the silent second login the derived
+    // key exists to prevent.
+    let sandbox = Sandbox::new();
+    let upper = TENANT.to_ascii_uppercase().replace('0', "A");
+    let lower = upper.to_ascii_lowercase();
+
+    let mut registry = Registry::default();
+    registry.identities.insert(
+        lower.clone(),
+        IdentityDefault {
+            username: Some("me@corp.com".into()),
+            client_id: None,
+        },
+    );
+
+    let a = sandbox.flat(&sandbox.tree(), &format!("tenant = \"{upper}\"\n"));
+    let b = sandbox.flat(&sandbox.other_tree(), &format!("tenant = \"{lower}\"\n"));
+
+    let ra = resolve_at(&sandbox, &a, &registry).unwrap();
+    let rb = resolve_at(&sandbox, &b, &registry).unwrap();
+
+    assert_eq!(ra.effective.tenant, rb.effective.tenant);
+    assert_eq!(
+        ra.effective.identity.username.as_deref(),
+        Some("me@corp.com"),
+        "the registry default must answer either spelling"
+    );
+    assert_eq!(ra.effective.identity_source, IdentitySource::Registry);
+    assert_eq!(ra.store, rb.store, "one tenant, one store");
+}
+
+#[test]
+fn a_registry_default_written_in_another_case_still_matches() {
+    let sandbox = Sandbox::new();
+    let mut registry = Registry::default();
+    registry.identities.insert(
+        TENANT.to_ascii_uppercase().replace('0', "A"),
+        IdentityDefault {
+            username: Some("me@corp.com".into()),
+            client_id: None,
+        },
+    );
+
+    let path = sandbox.flat(
+        &sandbox.tree(),
+        &format!("tenant = \"{}\"\n", TENANT.replace('0', "a")),
+    );
+    let resolved = resolve_at(&sandbox, &path, &registry).unwrap();
+    assert_eq!(resolved.effective.identity_source, IdentitySource::Registry);
+}
+
+#[test]
+fn one_operator_written_in_two_letter_cases_is_one_operator() {
+    let sandbox = Sandbox::new();
+    let registry = Registry::default();
+
+    let one_tree = sandbox.tree();
+    let one = sandbox.flat(&one_tree, &shared_toml());
+    sandbox.flat_local(&one_tree, "username = \"Me@Corp.com\"\n");
+
+    let two_tree = sandbox.other_tree();
+    let two = sandbox.flat(&two_tree, &shared_toml());
+    sandbox.flat_local(&two_tree, "username = \"me@corp.com\"\n");
+
+    assert_eq!(
+        resolve_at(&sandbox, &one, &registry).unwrap().store,
+        resolve_at(&sandbox, &two, &registry).unwrap().store,
+        "one person must not get two logins for capitalizing their own name"
+    );
+}
+
+#[test]
+fn a_subscription_guid_is_case_insensitive_but_a_display_name_is_not() {
+    let sandbox = Sandbox::new();
+    let registry = Registry::default();
+    let guid = SUBSCRIPTION.replace('2', "b");
+
+    let upper = sandbox.flat(
+        &sandbox.tree(),
+        &format!(
+            "tenant = \"{TENANT}\"\nsubscription = \"{}\"\n",
+            guid.to_ascii_uppercase()
+        ),
+    );
+    let lower = sandbox.flat(
+        &sandbox.other_tree(),
+        &format!("tenant = \"{TENANT}\"\nsubscription = \"{guid}\"\n"),
+    );
+    assert_eq!(
+        resolve_at(&sandbox, &upper, &registry).unwrap().store,
+        resolve_at(&sandbox, &lower, &registry).unwrap().store,
+        "a subscription GUID is one subscription however it is capitalized"
+    );
+
+    // A display name is free text that `az account set -s` matches literally,
+    // so its case is preserved rather than folded.
+    let named = sandbox.flat(
+        &sandbox.other_tree(),
+        &format!("tenant = \"{TENANT}\"\nsubscription = \"Pay-As-You-Go\"\n"),
+    );
+    let resolved = resolve_at(&sandbox, &named, &registry).unwrap();
+    assert_eq!(
+        resolved.effective.subscription.unwrap().as_str(),
+        "Pay-As-You-Go"
+    );
+}

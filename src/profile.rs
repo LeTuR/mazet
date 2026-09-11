@@ -294,9 +294,17 @@ impl Registry {
     }
 
     /// The identity default declared for `tenant`, if any non-empty one is.
+    ///
+    /// Matched case-insensitively. A tenant is case-insensitive to Entra, and
+    /// this file is edited by hand, so a default written `[identities."AAAA…"]`
+    /// has to answer a config that writes the same tenant in lower case —
+    /// otherwise the operator silently gets a second store instead of their
+    /// identity.
     pub fn identity_for(&self, tenant: &str) -> Option<&IdentityDefault> {
         self.identities
-            .get(tenant)
+            .iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case(tenant))
+            .map(|(_, identity)| identity)
             .filter(|identity| !identity.is_empty())
     }
 }

@@ -260,11 +260,18 @@ impl StoreChoice {
 pub struct Tenant(String);
 
 impl Tenant {
-    /// Validate a tenant value.
+    /// Validate a tenant value, and canonicalize its letter case.
+    ///
+    /// Both spellings a tenant has — a GUID and a DNS domain — are
+    /// case-insensitive, so the value is lowercased on the way in. Without
+    /// that, `AAAAAAAA-...` and `aaaaaaaa-...` are the same tenant to Entra
+    /// and two different store keys to [`crate::resolve::derived_key`], and
+    /// the registry's per-tenant identity default matches only one of them:
+    /// the silent second login this crate exists to prevent.
     pub fn parse(value: &str) -> Option<Self> {
         let value = value.trim();
         if is_guid(value) || is_domain(value) {
-            Some(Self(value.to_string()))
+            Some(Self(value.to_ascii_lowercase()))
         } else {
             None
         }
@@ -291,10 +298,17 @@ pub struct Subscription(String);
 
 impl Subscription {
     /// Validate a subscription value.
+    ///
+    /// A GUID is lowercased, for the same reason [`Tenant::parse`] lowercases
+    /// one. A display name is kept exactly as written: it is free text that
+    /// `az account set -s` matches literally, so changing its case would
+    /// change what gets selected.
     pub fn parse(value: &str) -> Option<Self> {
         let value = value.trim();
         if value.is_empty() || value.chars().any(char::is_control) {
             None
+        } else if is_guid(value) {
+            Some(Self(value.to_ascii_lowercase()))
         } else {
             Some(Self(value.to_string()))
         }
@@ -1130,6 +1144,10 @@ fn profile_name(
 /// An identifier: non-empty once trimmed, and no whitespace or control
 /// characters. A user principal name and a client id both satisfy it; a
 /// sentence does not.
+///
+/// Lowercased, like [`Tenant::parse`]: Entra treats a user principal name and
+/// a client id case-insensitively, so `Me@corp.com` and `me@corp.com` are one
+/// operator and must derive one store.
 fn identifier(
     file: &Path,
     key: &str,
@@ -1145,7 +1163,7 @@ fn identifier(
                     ConfigErrorKind::BadIdentity(raw.clone()),
                 ))
             } else {
-                Ok(trimmed.to_string())
+                Ok(trimmed.to_ascii_lowercase())
             }
         })
         .transpose()

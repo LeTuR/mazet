@@ -110,8 +110,10 @@ an error listing the ones it does.
 username = "me@corp.com"   # this operator's identity within the tenant
 client_id = "..."          # or their service principal / managed identity
 method = "device-code"     # overrides the shared default
-store = "local"            # "local" = .mazet/store/, "central" = a named profile
-profile = "client-a"       # use this named profile's store
+store = "local"            # "local" = .mazet/store/ beside this config;
+                           #   "central" = a store under your data directory,
+                           #   derived from the effective identity
+profile = "client-a"       # use this named profile's store instead; wins over `store`
 ```
 
 **A committed `.mazet` is the primary use case, and the layering is what keeps
