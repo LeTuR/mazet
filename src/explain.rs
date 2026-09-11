@@ -13,7 +13,7 @@
 //! Nothing here spawns a process or reads a credential. It takes what
 //! [`crate::config`] and [`crate::resolve`] already produced and says where
 //! each piece came from; the only filesystem access is asking whether the
-//! store directory is there and whether `az` has written a login into it.
+//! store directory is there and what `az` has written into its login file.
 
 use std::path::{Path, PathBuf};
 
@@ -27,13 +27,54 @@ use crate::{
 ///
 /// Its presence is the cheapest honest answer to "has anything logged in
 /// here?": `az` writes the subscription list into it at the end of a
-/// successful login. Nothing reads its *contents* — that would be reading a
-/// credential store to answer a question about a directory.
+/// successful login. Whether an account is in there *now* is the other
+/// question, and [`holds_account`] is what answers it.
 pub const LOGIN_MARKER: &str = "azureProfile.json";
 
-/// Whether a store directory holds a login.
+/// Whether a store directory has ever been logged into.
 pub fn has_login(store: &Path) -> bool {
     store.join(LOGIN_MARKER).is_file()
+}
+
+/// Whether a store holds an account **now**.
+///
+/// Not the same question as [`has_login`]. The two come apart because
+/// `az logout` REWRITES `azureProfile.json` with the subscriptions that are
+/// left rather than removing it (azure-cli 2.90.0, `Profile.logout`), so the
+/// file outlives the login it recorded. Taking its mere presence for a login
+/// would make a second `mazet logout` run `az logout` against an empty store,
+/// which `az` refuses with a non-zero exit.
+///
+/// An empty account list, or none at all, is no account. `az` writes this file
+/// at the START of every command it runs, so a store where nothing but
+/// `az cloud set` succeeded holds an installation id and no `subscriptions`
+/// key — nothing has logged in there, and running `az logout` against it would
+/// exit non-zero.
+///
+/// A file that does not parse is reported as holding one: `az` is the
+/// authority on its own store, and the honest answer to "I cannot tell" is to
+/// let it say so.
+pub fn holds_account(store: &Path) -> bool {
+    let Ok(text) = std::fs::read_to_string(store.join(LOGIN_MARKER)) else {
+        return false;
+    };
+    // `az` writes this file as `utf-8-sig` (azure-cli 2.90.0,
+    // `core/_session.py`), so it begins with a BOM, and `serde_json` does not
+    // skip one. Unstripped, every real file would fail to parse and every
+    // store would look logged in.
+    let text = text.trim_start_matches('\u{feff}');
+    match serde_json::from_str::<StoredProfile>(text) {
+        Ok(profile) => !profile.subscriptions.is_empty(),
+        Err(_) => true,
+    }
+}
+
+/// Just enough of `azureProfile.json` to count what is in it. Its contents are
+/// never read for anything else: it is a credential store, not a data source.
+#[derive(Debug, serde::Deserialize)]
+struct StoredProfile {
+    #[serde(default)]
+    subscriptions: Vec<serde_json::Value>,
 }
 
 /// Where an effective value came from.

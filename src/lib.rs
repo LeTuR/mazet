@@ -6,7 +6,8 @@
 //! defaulting to `~/.azure`. Two logins into that one directory compete: the
 //! second displaces the first. Giving each identity a directory of its own is
 //! the whole mechanism, and this crate is the part that decides *which*
-//! directory a given command should use.
+//! directory a given command should use — and then runs `az`, or anything
+//! else that reads `AZURE_CONFIG_DIR`, against it.
 //!
 //! # The two bindings
 //!
@@ -40,14 +41,29 @@
 //! identity on everyone who clones the repository has to be said out loud. See
 //! [`config::Warning`].
 //!
+//! # Talking to `az`
+//!
+//! Deciding the directory is half of it; running something there is the other
+//! half. [`login`] plans the `az` calls a config and the flags imply,
+//! [`exec`] builds the environment a child process is given, and [`status`]
+//! reads what `az account show` says a store holds — none of the three spawns
+//! anything.
+//!
+//! [`az`] is the **only** module that starts a process or reads a credential,
+//! and it owns the two rules that follow from that: `AZURE_CONFIG_DIR` is set
+//! on the child and never on this process, so no `mazet` command can move the
+//! calling shell's identity or write into the operator's own `~/.azure`; and a
+//! secret reaches `az` as a file path rather than in argv.
+//!
 //! # No secrets, ever
 //!
 //! A tenant, a subscription, a cloud, a username and a client id are
 //! identifiers. Nothing that *authenticates* — a password, a client secret, a
 //! certificate, a token — may appear in any `mazet` file, and
 //! [`config::Config::load`] refuses one rather than storing it. Those reach
-//! `az` from the environment at login time. `mazet` holds paths and names; `az`
-//! holds secrets, in the directory `mazet` points it at.
+//! `az` from the environment at login time — [`az::Credentials`] is the list
+//! of variables, and the only code that reads them. `mazet` holds paths and
+//! names; `az` holds secrets, in the directory `mazet` points it at.
 //!
 //! # Worked example
 //!
@@ -80,13 +96,17 @@
 
 #![deny(missing_docs)]
 
+pub mod az;
 pub mod cli;
 pub mod config;
 pub mod discover;
+pub mod exec;
 pub mod explain;
 pub mod hook;
 pub mod init;
+pub mod login;
 pub mod paths;
 pub mod profile;
 pub mod resolve;
+pub mod status;
 pub mod store;

@@ -29,11 +29,17 @@ use clap::{Args, Parser, Subcommand};
 
 use crate::paths::Paths;
 
+pub mod env_cmd;
+pub mod exec_cmd;
 pub mod home;
 pub mod hook_cmd;
 pub mod init_cmd;
+pub mod login_cmd;
+pub mod logout_cmd;
 pub mod output;
 pub mod profile_cmd;
+pub mod select;
+pub mod status_cmd;
 pub mod which_cmd;
 
 use output::{CommandOutput, Format, FormatFlags};
@@ -55,8 +61,13 @@ const EXAMPLES: &str = "\
 Examples:
   mazet init                         bind this directory tree to a store of its own
   mazet which                        which .mazet applies here, and what it resolves to
+  mazet login                        log in to the store this directory is bound to
+  mazet login --profile client-a     log in to a registered profile's store
+  mazet exec --env prod -- terraform plan     run anything against one identity
+  mazet status --all                 every store on this machine, and who is in it
+  eval \"$(mazet env --profile client-a)\"    put this shell in that store
   eval \"$(mazet hook bash)\"          make bare az honour the directory, every prompt
-  mazet                              show the registered profiles and where they live
+  mazet logout                       clear that one store, and nothing else
   mazet profile add client-a         register a profile with a store of its own
   mazet profile list                 name, store directory, and whether it exists yet
   mazet profile rm client-a          unregister it (the store directory is kept)
@@ -190,6 +201,38 @@ pub enum Command {
         #[command(subcommand)]
         command: hook_cmd::HookCommand,
     },
+
+    /// Log in to Azure, in a store of its own.
+    #[command(
+        after_help = login_cmd::LOGIN_EXAMPLES,
+        after_long_help = login_cmd::LOGIN_EXAMPLES
+    )]
+    Login(login_cmd::LoginArgs),
+
+    /// Log out of one store, and nothing else.
+    #[command(
+        after_help = logout_cmd::LOGOUT_EXAMPLES,
+        after_long_help = logout_cmd::LOGOUT_EXAMPLES
+    )]
+    Logout(logout_cmd::LogoutArgs),
+
+    /// Run any command against one store's identity.
+    #[command(
+        after_help = exec_cmd::EXEC_EXAMPLES,
+        after_long_help = exec_cmd::EXEC_EXAMPLES
+    )]
+    Exec(exec_cmd::ExecArgs),
+
+    /// Print the shell assignments that put a shell in one store.
+    #[command(after_help = env_cmd::ENV_EXAMPLES, after_long_help = env_cmd::ENV_EXAMPLES)]
+    Env(env_cmd::EnvArgs),
+
+    /// Whether a store holds a login, and who it says it is.
+    #[command(
+        after_help = status_cmd::STATUS_EXAMPLES,
+        after_long_help = status_cmd::STATUS_EXAMPLES
+    )]
+    Status(status_cmd::StatusArgs),
 }
 
 /// What a command needs from the environment it runs in.
@@ -258,18 +301,39 @@ impl std::fmt::Display for CommandError {
 
 impl std::error::Error for CommandError {}
 
+/// What a command produced.
+///
+/// Almost every command answers with a document. `mazet exec` does not: it
+/// *becomes* the child process, whose stdout and stderr are this process's own
+/// and whose exit status is the answer. A wrapper that printed a summary over
+/// a `terraform plan`, or reported its own success instead of the child's exit
+/// code, could not be put in a pipeline.
+#[derive(Debug)]
+pub enum Outcome {
+    /// A document to render and print.
+    Document(Box<CommandOutput>),
+    /// Nothing to print, and the status to exit with.
+    Passthrough(i32),
+}
+
+impl From<CommandOutput> for Outcome {
+    fn from(output: CommandOutput) -> Self {
+        Outcome::Document(Box::new(output))
+    }
+}
+
 /// Run a parsed invocation.
-pub fn run(cli: &Cli, ctx: &Context) -> Result<CommandOutput, CommandError> {
+pub fn run(cli: &Cli, ctx: &Context) -> Result<Outcome, CommandError> {
     dispatch(cli.command.as_ref(), ctx)
 }
 
 /// Dispatch to the command's implementation.
 ///
 /// See [`Command`]: this match is the other half of the registration point.
-pub fn dispatch(command: Option<&Command>, ctx: &Context) -> Result<CommandOutput, CommandError> {
+pub fn dispatch(command: Option<&Command>, ctx: &Context) -> Result<Outcome, CommandError> {
     match command {
-        None => home::run(ctx),
-        Some(Command::Profile { command }) => profile_cmd::run(command, ctx),
+        None => home::run(ctx).map(Outcome::from),
+        Some(Command::Profile { command }) => profile_cmd::run(command, ctx).map(Outcome::from),
         Some(Command::Init {
             tenant,
             subscription,
@@ -285,9 +349,15 @@ pub fn dispatch(command: Option<&Command>, ctx: &Context) -> Result<CommandOutpu
             *local,
             *force,
             ctx,
-        ),
-        Some(Command::Which { env }) => which_cmd::run(env.clone(), ctx),
-        Some(Command::Hook { command }) => hook_cmd::run(command, ctx),
+        )
+        .map(Outcome::from),
+        Some(Command::Which { env }) => which_cmd::run(env.clone(), ctx).map(Outcome::from),
+        Some(Command::Hook { command }) => hook_cmd::run(command, ctx).map(Outcome::from),
+        Some(Command::Login(args)) => login_cmd::run(args, ctx).map(Outcome::from),
+        Some(Command::Logout(args)) => logout_cmd::run(args, ctx).map(Outcome::from),
+        Some(Command::Exec(args)) => exec_cmd::run(args, ctx),
+        Some(Command::Env(args)) => env_cmd::run(args, ctx).map(Outcome::from),
+        Some(Command::Status(args)) => status_cmd::run(args, ctx).map(Outcome::from),
     }
 }
 

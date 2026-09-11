@@ -131,6 +131,9 @@ impl Sandbox {
             .env("MAZET_CONFIG_DIR", self.paths.config_dir())
             .env_remove("MAZET_ENV")
             .env_remove("AZURE_CONFIG_DIR");
+        for var in CREDENTIAL_VARS {
+            cmd.env_remove(var);
+        }
         cmd
     }
 
@@ -148,3 +151,233 @@ pub const TENANT: &str = "00000000-0000-0000-0000-000000000000";
 pub const OTHER_TENANT: &str = "11111111-1111-1111-1111-111111111111";
 pub const SUBSCRIPTION: &str = "22222222-2222-2222-2222-222222222222";
 pub const OTHER_SUBSCRIPTION: &str = "33333333-3333-3333-3333-333333333333";
+
+/// Every variable that could hand `az` a credential, plus the one that says
+/// which `az` to run.
+///
+/// Removed from every invocation: a suite whose result depends on what the
+/// developer happened to have exported proves nothing, and one of these left
+/// set would change which of the eight login modes is chosen.
+pub const CREDENTIAL_VARS: [&str; 9] = [
+    "MAZET_AZ",
+    "MAZET_PASSWORD",
+    "MAZET_PASSWORD_FILE",
+    "MAZET_CERTIFICATE",
+    "MAZET_FEDERATED_TOKEN",
+    "MAZET_FEDERATED_TOKEN_FILE",
+    "AZURE_CLIENT_SECRET",
+    "AZURE_CLIENT_CERTIFICATE_PATH",
+    "AZURE_FEDERATED_TOKEN_FILE",
+];
+
+/// The stub `az` built as an example of this crate.
+///
+/// `cargo test` builds examples, and they land beside the test binaries:
+/// `target/<profile>/examples/`. Located from the running test rather than
+/// from a hardcoded path, so it is right under `--release` and under a
+/// `CARGO_TARGET_DIR` somewhere else.
+pub fn stub_exe() -> PathBuf {
+    let mut dir = std::env::current_exe().expect("the test binary's own path");
+    dir.pop();
+    if dir.ends_with("deps") {
+        dir.pop();
+    }
+    let path = dir
+        .join("examples")
+        .join(format!("az_stub{}", std::env::consts::EXE_SUFFIX));
+    assert!(
+        path.is_file(),
+        "the az stub was not built at {}. `cargo test` builds examples; run it rather than \
+         `cargo test --test <name>` alone.",
+        path.display()
+    );
+    path
+}
+
+/// One recorded invocation of the stub.
+#[derive(Debug, Clone)]
+pub struct Call(serde_json::Value);
+
+impl Call {
+    /// The arguments, after the program name.
+    pub fn argv(&self) -> Vec<String> {
+        self.0["argv"]
+            .as_array()
+            .map(|items| {
+                items
+                    .iter()
+                    .map(|item| item.as_str().unwrap_or_default().to_string())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// The first argument, which is the `az` verb.
+    pub fn verb(&self) -> String {
+        self.argv().first().cloned().unwrap_or_default()
+    }
+
+    /// An identity-bearing variable the child was given.
+    pub fn env(&self, key: &str) -> Option<String> {
+        self.0["env"][key].as_str().map(str::to_string)
+    }
+
+    /// Whether the flag is in argv at all.
+    pub fn has(&self, flag: &str) -> bool {
+        self.argv().iter().any(|arg| arg == flag)
+    }
+
+    /// The value that followed `flag`.
+    pub fn value_after(&self, flag: &str) -> Option<String> {
+        let argv = self.argv();
+        let index = argv.iter().position(|arg| arg == flag)?;
+        argv.get(index + 1).cloned()
+    }
+
+    /// What was inside the file an `@<path>` argument pointed at — the
+    /// credential, as `az` would have expanded it.
+    pub fn credential_behind(&self, flag: &str) -> Option<String> {
+        let token = self.value_after(flag)?;
+        let path = token.strip_prefix('@')?;
+        self.0["expanded"][path].as_str().map(str::to_string)
+    }
+
+    /// Whether any argument holds this text. Used to prove a secret did not.
+    pub fn argv_contains(&self, needle: &str) -> bool {
+        self.argv().iter().any(|arg| arg.contains(needle))
+    }
+}
+
+impl Sandbox {
+    /// A directory holding the stub, ready to be put first on `PATH`.
+    ///
+    /// On Windows the Azure CLI is `az.cmd`, a batch script rather than a PE
+    /// binary, so that is what is installed here: the shim is the shape
+    /// `mazet` has to cope with, and installing an `az.exe` instead would
+    /// leave the interesting half untested.
+    pub fn bin_dir(&self) -> PathBuf {
+        let dir = self.root().join("bin");
+        std::fs::create_dir_all(&dir).expect("bin dir");
+        let stub = stub_exe();
+        install(&stub, &dir, "az");
+        // The same program under a name that is not `az`, for the exec tests:
+        // `mazet exec` runs anything, and a test that only ever ran `az` would
+        // not show it.
+        install(&stub, &dir, "child");
+        dir
+    }
+
+    /// The file the stub appends its invocations to.
+    pub fn stub_log(&self) -> PathBuf {
+        self.root().join("az-calls.jsonl")
+    }
+
+    /// `mazet`, with the stub `az` first on `PATH`.
+    pub fn mazet_stubbed(&self, dir: &Path) -> std::process::Command {
+        let mut cmd = self.mazet(dir);
+        let bin = self.bin_dir();
+        let path = match std::env::var_os("PATH") {
+            Some(existing) => {
+                let mut dirs = vec![bin];
+                dirs.extend(std::env::split_paths(&existing));
+                std::env::join_paths(dirs).expect("join PATH")
+            }
+            None => bin.into_os_string(),
+        };
+        cmd.env("PATH", path).env("MAZET_STUB_LOG", self.stub_log());
+        cmd
+    }
+
+    /// Every invocation the stub recorded, in order.
+    pub fn calls(&self) -> Vec<Call> {
+        let text = std::fs::read_to_string(self.stub_log()).unwrap_or_default();
+        text.lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| Call(serde_json::from_str(line).expect("the stub writes JSON lines")))
+            .collect()
+    }
+
+    /// The one invocation whose verb is `verb`, failing loudly when there is
+    /// not exactly one.
+    pub fn call(&self, verb: &str) -> Call {
+        let matching: Vec<Call> = self
+            .calls()
+            .into_iter()
+            .filter(|call| call.verb() == verb)
+            .collect();
+        assert_eq!(
+            matching.len(),
+            1,
+            "expected exactly one `az {verb}`, got {}: {:#?}",
+            matching.len(),
+            self.calls()
+        );
+        matching.into_iter().next().expect("one call")
+    }
+
+    /// Whether any invocation used this verb.
+    pub fn ran(&self, verb: &str) -> bool {
+        self.calls().iter().any(|call| call.verb() == verb)
+    }
+
+    /// Give a store a login, in the envelope `az` keeps its account list in.
+    pub fn plant_login(&self, store: &Path, account: &str) {
+        self.plant_profile(
+            store,
+            &format!(r#"{{"installationId":"test","subscriptions":[{account}]}}"#),
+        );
+    }
+
+    /// Write `azureProfile.json` the way `az` writes it: UTF-8 with a BOM,
+    /// because azure-cli opens that session file as `utf-8-sig`. Anything that
+    /// reads it has to cope with the byte the real CLI actually puts there.
+    pub fn plant_profile(&self, store: &Path, body: &str) {
+        std::fs::create_dir_all(store).expect("store");
+        std::fs::write(store.join("azureProfile.json"), format!("\u{feff}{body}"))
+            .expect("azureProfile.json");
+    }
+
+    /// How many accounts a store holds, read straight out of `az`'s own
+    /// `azureProfile.json` rather than through the code under test.
+    pub fn accounts_in(&self, store: &Path) -> usize {
+        let Ok(text) = std::fs::read_to_string(store.join("azureProfile.json")) else {
+            return 0;
+        };
+        let profile: serde_json::Value =
+            serde_json::from_str(text.trim_start_matches('\u{feff}')).expect("az writes JSON");
+        profile["subscriptions"]
+            .as_array()
+            .map(Vec::len)
+            .unwrap_or(0)
+    }
+}
+
+#[cfg(not(windows))]
+fn install(stub: &Path, dir: &Path, name: &str) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let target = dir.join(name);
+    // Copied once per sandbox. A second copy over a running one is
+    // `ETXTBSY`, and `bin_dir` is called again for every invocation — the
+    // concurrency tests have one of these running while the next is set up.
+    if target.exists() {
+        return;
+    }
+    std::fs::copy(stub, &target).expect("copy the stub");
+    std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755))
+        .expect("make the stub executable");
+}
+
+#[cfg(windows)]
+fn install(stub: &Path, dir: &Path, name: &str) {
+    let target = dir.join(format!("{name}.cmd"));
+    if target.exists() {
+        return;
+    }
+    // A one-line forwarder, which is exactly what the real `az.cmd` is.
+    std::fs::write(
+        &target,
+        format!("@echo off\r\n\"{}\" %*\r\n", stub.display()),
+    )
+    .expect("write the stub shim");
+}

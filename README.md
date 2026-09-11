@@ -50,6 +50,11 @@ cargo install --git https://github.com/LeTuR/mazet
 ```sh
 mazet init                     # bind this directory tree to a store of its own
 mazet which                    # which .mazet applies here, and what it resolves to
+mazet login                    # az login, in the store this directory is bound to
+mazet logout                   # az logout, in that one store and nowhere else
+mazet exec -- terraform plan   # run anything against that identity
+mazet env                      # the shell assignments that put a shell there
+mazet status --all             # every profile and derived store, and who is in it
 mazet hook bash                # shell code that keeps AZURE_CONFIG_DIR in step
 mazet                          # what this machine knows about
 mazet profile add client-a     # register a profile with a store of its own
@@ -57,15 +62,34 @@ mazet profile list             # name, store directory, and whether it exists ye
 mazet profile rm client-a      # unregister it (the store directory is kept)
 ```
 
+Every command that talks to `az` picks its store the same way, and the three
+rules are the same everywhere:
+
+```text
+  --profile <name>   a registered profile's store
+  --mazet <path>     the store that .mazet resolves to
+  neither            the .mazet the current directory is bound to
+```
+
+`--env <name>` then picks among the environments a config declares. **Each
+environment is its own store**, because `az` keeps one active subscription per
+store — so `mazet exec --env prod` and `mazet exec --env dev` run at the same
+time without either moving the other's active subscription.
+
 `mazet` is an [AXI](https://axi.md) (`axi/1.0-2026-07`): output is
 human-readable on a terminal and [TOON](https://github.com/toon-format/spec)
 down a pipe, every help surface carries worked examples, and errors say what to
 do next. Force a format with `--json`, `--pretty`, `--toon` or `--text`.
 
-The two `mazet hook` outputs are the exception to the pipe default: shell code
-for `eval`, and the single store path a hook captures with `$(...)`, stay raw
-down a pipe, because TOON there is something no shell can run. An explicit
-`--json`, `--pretty` or `--toon` still wins.
+The `mazet hook` outputs and `mazet env` are the exception to the pipe default:
+shell code for `eval`, and the single store path a hook captures with `$(...)`,
+stay raw down a pipe, because TOON there is something no shell can run. An
+explicit `--json`, `--pretty` or `--toon` still wins.
+
+`mazet exec` is the other exception, and a bigger one: it prints no document at
+all. The child's stdout and stderr are `mazet`'s own, untouched, and the child's
+exit status is `mazet`'s exit status — a wrapper that swallowed a
+`terraform plan` exit code could not be put in a pipeline.
 
 Exit codes are `0` for success, `1` for a command that ran and failed, `2` for
 a usage error, and `3` for a directory that is bound to no `.mazet`. A failure
@@ -203,6 +227,183 @@ Under the hood the hook calls `mazet hook resolve`, which prints one line — th
 store — and nothing else. You do not normally run it yourself; `mazet which`
 answers the same question with the provenance of every value.
 
+## Logging in — `mazet login`
+
+```sh
+mazet login                              # in the store this directory is bound to
+mazet login --env prod                   # in the prod environment's own store
+mazet login --profile client-a           # in a registered profile's store
+```
+
+Every authentication mode `az login` has is reachable. The **method** comes from
+the config (`method = "..."`, default `interactive`) or from `--method`, and
+which credential the environment offers decides the rest:
+
+| mode | how to get it | what `mazet` runs |
+|---|---|---|
+| interactive browser | the default | `az login [--tenant T]` |
+| device code | `--use-device-code`, or `method = "device-code"` | `az login --use-device-code` |
+| user with password | `--username U` + a password in the environment | `az login --username U --password @F` |
+| service principal, secret | `method = "service-principal"` + a secret | `az login --service-principal --username APP --password @F --tenant T` |
+| service principal, certificate | `method = "service-principal"` + a certificate | `az login --service-principal --username APP --certificate PEM --tenant T` |
+| …rolling by SN+I | and `--use-cert-sn-issuer` | …`--use-cert-sn-issuer` |
+| federated / OIDC | `method = "federated"` + a token | `az login --service-principal --username APP --federated-token @F --tenant T` |
+| managed identity, system | `method = "managed-identity"` | `az login --identity` |
+| managed identity, user-assigned | …and one of `--client-id`, `--object-id`, `--resource-id` | `az login --identity --client-id C` |
+
+A managed identity login carries **no tenant**, even when the `.mazet` declares
+one: `az` refuses `--identity` alongside a tenant outright, because a managed
+identity is the host's and its tenant comes with it. The declared tenant still
+applies everywhere else — it is what `mazet exec` exports as `ARM_TENANT_ID`,
+and it is part of what gives that store its own directory.
+
+`--allow-no-subscriptions` (tenant-level work, for `az ad`), `--scope`,
+`--claims-challenge` and `--skip-subscription-discovery` are passed through.
+`--scope` repeats, and every scope reaches `az` under one flag, because `az`
+declares it as a multi-value argument and would keep only the last of several.
+`--skip-subscription-discovery` requires a tenant — that is `az`'s own rule, and
+`mazet` says so before starting anything rather than letting `az` fail — and
+with a subscription it needs the **id**, not a display name. It cannot be
+combined with a managed identity at all, since `az` refuses a tenant there.
+A device code login cannot take a `--username` either: whoever types the code is
+who the store becomes, so `mazet` refuses the pair rather than quietly dropping
+the name.
+
+A password lying around does not silently change an interactive login into a
+password one: that happens only when `--username` asks for it. An
+`AZURE_CLIENT_SECRET` a CI image exported for something else is ignored by
+`mazet login` with no `--method` and no `--username`.
+
+### The order, and why it is that order
+
+```text
+  az cloud set -n <cloud>       only when the config DECLARED a cloud
+  az login <mode flags>         the authentication itself
+  az account set -s <sub>       only when the config names a subscription
+```
+
+Both ends are **per-store state**, and both are easy to get backwards:
+
+- **`cloud` goes first.** `az cloud set` writes into `AZURE_CONFIG_DIR`, so a
+  login made before it authenticated against the wrong cloud's endpoints. A
+  config that declares no `cloud` issues no `az cloud set` at all, rather than
+  asserting `AzureCloud` over whatever that store already chose.
+- **`subscription` goes last.** The subscription list does not exist until the
+  login discovered it. The exception is `--skip-subscription-discovery`, where
+  the subscription is part of the login call and nothing runs after it.
+
+**A missing key skips a step; it never fails the command.** No `tenant` means no
+`--tenant`. No `subscription` means nothing is selected afterwards and `az`'s
+own default stands. An empty `.mazet` is therefore exactly one call — a plain
+`az login`, in that tree's own store — which is the whole tool in its smallest
+useful form.
+
+## Secrets come from the environment, never from a `.mazet`
+
+A `.mazet` holds identifiers: a tenant, a subscription, a cloud, a username, a
+client id. Nothing that *authenticates* may go in one, and the parser refuses a
+key that looks like a credential rather than storing it. The secret reaches `az`
+from the environment, at login time:
+
+| credential | `mazet`'s variables | `az`-native |
+|---|---|---|
+| user password, or a service principal's client secret | `MAZET_PASSWORD_FILE` (a path), `MAZET_PASSWORD` (the value) | `AZURE_CLIENT_SECRET` (the value) |
+| a PEM with the key and the certificate | `MAZET_CERTIFICATE` (a path) | `AZURE_CLIENT_CERTIFICATE_PATH` (a path) |
+| a federated (OIDC) token | `MAZET_FEDERATED_TOKEN_FILE` (a path), `MAZET_FEDERATED_TOKEN` (the value) | `AZURE_FEDERATED_TOKEN_FILE` (a path) |
+
+They are consulted in that order, left to right: a `_FILE` spelling wins over a
+value spelling of the same credential, and a `MAZET_` variable set on purpose
+for this command wins over an `AZURE_` one a CI image exported for everything.
+An empty variable counts as unset.
+
+**A secret never reaches a command line.** `az` expands an argument written
+`@<path>` by reading that file, so `mazet` always hands it a *path*: the
+variable's own, for the `_FILE` and `_PATH` spellings, and otherwise a `0600`
+file written inside the store — which is itself `0700` — and deleted the moment
+the login is over. Argv is world-readable through `ps`; that file is not.
+Nothing `mazet` prints ever carries a credential either: it reports the **name**
+of the variable a login used, and never what was in it.
+
+A trailing newline is not part of the secret. `echo secret > secret.txt` leaves
+one behind, and a password sent with a `
+` on the end fails as a *wrong
+password*, with nothing in the error pointing at why — so `mazet` drops exactly
+one trailing line ending, writing its own private copy only when the file
+actually had one. `MAZET_CERTIFICATE` and `AZURE_CLIENT_CERTIFICATE_PATH` are
+exempt: `az` opens that path itself as a PEM, and a PEM ends in a newline by
+definition.
+
+## Running things — `mazet exec` and `mazet env`
+
+```sh
+mazet exec -- az account show                  # az, as this directory's identity
+mazet exec --env prod -- terraform plan        # terraform against the prod environment
+mazet exec --profile client-a -- az group list # a registered profile's identity
+```
+
+`mazet exec` runs **anything**, not only `az`: `terraform`, `kubelogin` and the
+Azure SDKs all read `AZURE_CONFIG_DIR`. The child also gets the two identifiers
+the Terraform `azurerm` provider reads *instead* of the store:
+
+| variable | when it is set |
+|---|---|
+| `AZURE_CONFIG_DIR` | always — it is the store |
+| `ARM_TENANT_ID` | when the selected environment names a tenant |
+| `ARM_SUBSCRIPTION_ID` | when it names a subscription **as an id** |
+
+A variable the selected environment does **not** name is removed from the child
+rather than left standing, and `mazet env` prints an `unset` for it: the shell
+you are in may still hold another store's `ARM_SUBSCRIPTION_ID` from an earlier
+`eval "$(mazet env --env prod)"`, and `azurerm` prefers that variable over the
+store.
+
+`ARM_SUBSCRIPTION_ID` is left unset for a subscription written as a display
+name, because `azurerm` takes only a GUID there and a name would fail the plan
+with a parse error. Unset, the provider falls back to the store's active
+subscription — which `mazet login` already selected from that same name.
+
+`mazet env` prints the same assignments as shell code, for a whole shell rather
+than one command:
+
+```sh
+eval "$(mazet env)"                       # this shell, in this directory's store
+eval "$(mazet env --profile client-a)"    # ...in that profile's store
+mazet env --shell fish | source
+mazet env --json                          # `variables` to set, `unset` to remove, for a script
+```
+
+`AZURE_CONFIG_DIR` is set on the **child**, never on `mazet` itself. Your own
+`~/.azure` is never written to, and no `mazet` command changes the environment
+of the shell that ran it — `mazet env` prints code for you to evaluate, which is
+the difference.
+
+## What a store holds — `mazet status`
+
+```sh
+mazet status                     # the store this directory is bound to
+mazet status --profile client-a  # a registered profile's store
+mazet status --all               # every profile and derived store
+```
+
+For each store: the directory, whether a login is present, and the tenant,
+subscription, cloud and identity that `az account show` reports inside it. A
+store with nothing logged into it says so rather than failing — it is the state
+every store starts in, and it is also the state `mazet logout` leaves behind. The
+two are reported apart, because `az logout` empties the account list in
+`azureProfile.json` rather than removing the file, so what is *in* that file is
+the answer and its presence is not. `--all` asks the stores at the same time and skips
+`az` entirely for the ones with no login, so ten profiles stay fast. It covers the
+registered profiles and the derived stores under mazet's data directory; a tree
+that keeps its store inside its own `.mazet/` is reported by running
+`mazet status` in that tree.
+
+## Which `az`
+
+`az` is found on `PATH`. On Windows the Azure CLI installs as `az.cmd`, a batch
+script rather than a `.exe`, so `mazet` walks `PATH` itself and tries each
+`PATHEXT` suffix rather than handing the bare name to the process loader. Set
+**`MAZET_AZ`** to an explicit path to override the answer.
+
 ## The `.mazet` format
 
 A directory tree declares which identity it belongs to with a `.mazet` at its
@@ -298,7 +499,7 @@ default → shared config**.
 |---|---|
 | `tenant` | no `--tenant` on the login; you pick your tenant as `az login` already lets you |
 | `subscription` | nothing is selected after login; `az`'s own default stands |
-| `cloud` | `AzureCloud` |
+| `cloud` | no `az cloud set` on the login, so the store keeps the cloud it already had; `mazet which` reports the default, `AzureCloud` |
 | `method` | `interactive` |
 | `default_env`, with several `[env.*]` and no selection | the top-level keys alone, and a warning naming the environments not chosen |
 | every key | the store is bound to this config's location and nothing else |
@@ -471,9 +672,9 @@ username = "me@corp.com"
 
 ## Status
 
-The crate, the pipelines, the profile model and directory resolution (`init`,
-`which`, the walk up to a `.mazet`, the shell hooks) are in place. `az`
-interaction — `login`, `logout`, `exec`, `env` and `status` — is next.
+The crate, the pipelines, the profile model, directory resolution (`init`,
+`which`, the walk up to a `.mazet`, the shell hooks) and the `az` interaction
+(`login` in every mode, `logout`, `exec`, `env` and `status`) are in place.
 
 ## Contributing
 
