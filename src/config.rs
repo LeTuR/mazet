@@ -45,7 +45,8 @@
 //! username = "me@corp.com"
 //! client_id = "..."
 //! method = "device-code"     # overrides the shared default
-//! store = "local"            # "local" = .mazet/store/, "central" = a profile
+//! store = "local"            # "local" = .mazet/store/, "central" = a derived
+//!                            #   store under the data directory
 //! profile = "client-a"
 //! ```
 //!
@@ -277,7 +278,7 @@ impl Tenant {
         }
     }
 
-    /// The value as written.
+    /// The canonicalized value: trimmed and lowercased by [`Tenant::parse`].
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -314,7 +315,7 @@ impl Subscription {
         }
     }
 
-    /// The value as written.
+    /// The validated value: a GUID lowercased, a display name as written.
     pub fn as_str(&self) -> &str {
         &self.0
     }
