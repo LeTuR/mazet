@@ -80,13 +80,17 @@
 
 #![deny(missing_docs)]
 
+pub mod az;
 pub mod cli;
 pub mod config;
 pub mod discover;
+pub mod exec;
 pub mod explain;
 pub mod hook;
 pub mod init;
+pub mod login;
 pub mod paths;
 pub mod profile;
 pub mod resolve;
+pub mod status;
 pub mod store;

@@ -319,6 +319,16 @@ impl Subscription {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// Whether this is the id spelling rather than the display-name one.
+    ///
+    /// The two are interchangeable to `az account set -s`, and are not to
+    /// `az login --skip-subscription-discovery`, which fetches one
+    /// subscription by a direct API call and needs the id. A caller that has
+    /// to tell them apart asks here rather than re-deriving the shape.
+    pub fn is_guid(&self) -> bool {
+        is_guid(&self.0)
+    }
 }
 
 impl fmt::Display for Subscription {

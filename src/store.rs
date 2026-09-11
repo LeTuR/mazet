@@ -66,6 +66,10 @@ fn io(path: &Path) -> impl FnOnce(std::io::Error) -> StoreError + '_ {
 /// silently trusted. Parents that were already there are not touched — only
 /// the ones created here get their mode set.
 ///
+/// Safe to run concurrently with another `mazet`: a parent that appeared
+/// between the check and the create is not an error, because two commands
+/// against two different stores necessarily create the same parents.
+///
 /// On Unix the mode is `0700`, on every directory created and not just the
 /// leaf: a store's own name is a fragment of the identity it holds, so the
 /// listing of the directory holding the stores discloses the set of Azure
@@ -82,8 +86,16 @@ pub fn ensure_dir(path: &Path) -> Result<(), StoreError> {
         .take_while(|dir| !dir.as_os_str().is_empty() && !dir.exists())
         .collect();
     for dir in missing.iter().rev() {
-        std::fs::create_dir(dir).map_err(io(dir))?;
-        set_private(dir)?;
+        match std::fs::create_dir(dir) {
+            Ok(()) => set_private(dir)?,
+            // Another `mazet` got there first. Two stores share every parent
+            // above them, so two commands creating two *different* stores at
+            // the same time race over `stores/` — which is the ordinary case
+            // for a tool whose whole point is running several identities at
+            // once. Whoever created it also made it private.
+            Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(source) => return Err(io(dir)(source)),
+        }
     }
     set_private(path)
 }
