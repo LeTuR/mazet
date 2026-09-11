@@ -59,20 +59,32 @@ fn io(path: &Path) -> impl FnOnce(std::io::Error) -> StoreError + '_ {
     }
 }
 
-/// Create `path` and every missing parent, and make it private to this user.
+/// Create `path` and every missing parent, and make them private to this user.
 ///
 /// Idempotent: an existing directory is left alone except that its mode is
 /// re-asserted, so a store whose permissions drifted is repaired rather than
-/// silently trusted.
+/// silently trusted. Parents that were already there are not touched — only
+/// the ones created here get their mode set.
 ///
-/// On Unix the mode is `0700`. On Windows the default ACL already limits a
-/// directory under the user's profile to that user and the administrators
-/// group, and there is no portable mode to set, so creation is all this does.
+/// On Unix the mode is `0700`, on every directory created and not just the
+/// leaf: a store's own name is a fragment of the identity it holds, so the
+/// listing of the directory holding the stores discloses the set of Azure
+/// identities on the machine and has to be private too. On Windows the
+/// default ACL already limits a directory under the user's profile to that
+/// user and the administrators group, and there is no portable mode to set,
+/// so creation is all this does.
 pub fn ensure_dir(path: &Path) -> Result<(), StoreError> {
     if path.exists() && !path.is_dir() {
         return Err(StoreError::NotADirectory(path.to_path_buf()));
     }
-    std::fs::create_dir_all(path).map_err(io(path))?;
+    let missing: Vec<&Path> = path
+        .ancestors()
+        .take_while(|dir| !dir.as_os_str().is_empty() && !dir.exists())
+        .collect();
+    for dir in missing.iter().rev() {
+        std::fs::create_dir(dir).map_err(io(dir))?;
+        set_private(dir)?;
+    }
     set_private(path)
 }
 

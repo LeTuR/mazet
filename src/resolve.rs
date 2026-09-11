@@ -134,8 +134,8 @@ pub fn resolve(
         if let Some(tenant) = &effective.tenant {
             if let Some(default) = registry.identity_for(tenant.as_str()) {
                 effective.identity = IdentityRef {
-                    username: default.username.clone(),
-                    client_id: default.client_id.clone(),
+                    username: default.username.as_deref().map(canonical_identifier),
+                    client_id: default.client_id.as_deref().map(canonical_identifier),
                 };
                 effective.identity_source = IdentitySource::Registry;
             }
@@ -188,6 +188,18 @@ pub fn resolve(
         effective,
         warnings,
     })
+}
+
+/// Fold a registry identity default the way a `.mazet`'s own `username` and
+/// `client_id` are folded when they are read.
+///
+/// A `.mazet` goes through validation that trims and lowercases; the registry
+/// is deserialized straight from a hand-edited file and does not. Entra treats
+/// both identifiers case-insensitively, so without this a default written
+/// `Me@Corp.com` derives a different store from a local file spelling the same
+/// identity — a silent second login.
+fn canonical_identifier(value: &str) -> String {
+    value.trim().to_ascii_lowercase()
 }
 
 /// The name of the central store a config derives, when it names no profile

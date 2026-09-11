@@ -579,3 +579,70 @@ fn a_subscription_guid_is_case_insensitive_but_a_display_name_is_not() {
         "Pay-As-You-Go"
     );
 }
+
+#[test]
+fn a_registry_identity_written_in_two_letter_cases_is_one_identity() {
+    let sandbox = Sandbox::new();
+
+    let mut registry = Registry::default();
+    registry.identities.insert(
+        TENANT.to_string(),
+        IdentityDefault {
+            username: Some("Me@Corp.com".into()),
+            client_id: None,
+        },
+    );
+
+    let shared_only = sandbox.flat(&sandbox.tree(), &shared_toml());
+    let from_registry = resolve_at(&sandbox, &shared_only, &registry).unwrap();
+    assert_eq!(
+        from_registry.effective.identity_source,
+        IdentitySource::Registry
+    );
+    assert_eq!(
+        from_registry.effective.identity.username.as_deref(),
+        Some("me@corp.com"),
+        "a hand-edited registry is folded like a .mazet's own username"
+    );
+
+    let other = sandbox.other_tree();
+    let local_spelling = sandbox.flat(&other, &shared_toml());
+    sandbox.flat_local(&other, "username = \"Me@Corp.com\"\n");
+    let from_local = resolve_at(&sandbox, &local_spelling, &Registry::default()).unwrap();
+
+    assert_eq!(
+        from_registry.store, from_local.store,
+        "one Entra identity, one store: the registry's spelling must not \
+         derive a second one and cost a second az login"
+    );
+}
+
+#[test]
+fn a_registry_client_id_written_in_two_letter_cases_is_one_identity() {
+    let sandbox = Sandbox::new();
+
+    let mut registry = Registry::default();
+    registry.identities.insert(
+        TENANT.to_string(),
+        IdentityDefault {
+            username: None,
+            client_id: Some("AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE".into()),
+        },
+    );
+
+    let shared_only = sandbox.flat(&sandbox.tree(), &shared_toml());
+    let from_registry = resolve_at(&sandbox, &shared_only, &registry).unwrap();
+
+    let other = sandbox.other_tree();
+    let local_spelling = sandbox.flat(&other, &shared_toml());
+    sandbox.flat_local(
+        &other,
+        "client_id = \"AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE\"\n",
+    );
+    let from_local = resolve_at(&sandbox, &local_spelling, &Registry::default()).unwrap();
+
+    assert_eq!(
+        from_registry.store, from_local.store,
+        "a service principal's client id is case-insensitive to Entra too"
+    );
+}

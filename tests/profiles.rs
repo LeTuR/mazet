@@ -180,3 +180,32 @@ fn a_store_directory_is_private_to_the_user() {
     let mode = std::fs::metadata(&store).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o700, "a drifted store is put back to 0700");
 }
+
+#[cfg(unix)]
+#[test]
+fn the_directories_a_store_is_created_under_are_private_too() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let sandbox = Sandbox::new();
+    let store = sandbox
+        .paths()
+        .profile_store(&ProfileName::parse("client-a").unwrap());
+    assert!(!sandbox.paths().data_dir().exists());
+
+    store::ensure_dir(&store).unwrap();
+
+    for dir in [
+        sandbox.paths().data_dir().to_path_buf(),
+        sandbox.paths().profiles_dir(),
+        store,
+    ] {
+        let mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode,
+            0o700,
+            "{} names the identities this operator holds, so another local \
+             account must not be able to list it, got {mode:o}",
+            dir.display()
+        );
+    }
+}

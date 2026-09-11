@@ -164,8 +164,8 @@ fn a_scalar_subscription_with_no_blocks_behaves_as_before() {
     );
 
     // ...and a config that says the same thing through a sole `[env.*]` block
-    // is a different store, because the subscription is the same but the
-    // config's shape is not what the key is made of — the values are.
+    // is the SAME store, because the key is made of the effective values and
+    // the config's shape is not one of them.
     let via_env = sandbox.flat(
         &sandbox.other_tree(),
         &format!("tenant = \"{TENANT}\"\n[env.only]\nsubscription = \"{SUBSCRIPTION}\"\n"),
