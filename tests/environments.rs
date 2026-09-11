@@ -190,3 +190,34 @@ fn a_default_env_naming_an_undeclared_block_is_an_error() {
         .expect_err("default_env must name a block that exists");
     assert_eq!(err.key.as_deref(), Some("default_env"));
 }
+
+#[test]
+fn the_no_environments_suggestion_names_the_key_that_selected_one() {
+    let sandbox = Sandbox::new();
+
+    let default_env = sandbox.flat(&sandbox.tree(), "default_env = \"staging\"\n");
+    let rendered = Config::load(&default_env)
+        .unwrap()
+        .select_env(&EnvSelection::none())
+        .expect_err("default_env must name a block that exists")
+        .to_string();
+    assert!(
+        rendered.contains("remove `default_env`"),
+        "the suggestion must name the key that asked: {rendered}"
+    );
+
+    let bare = sandbox.flat(&sandbox.other_tree(), "");
+    let selection = EnvSelection {
+        flag: None,
+        variable: Some("staging".to_string()),
+    };
+    let rendered = Config::load(&bare)
+        .unwrap()
+        .select_env(&selection)
+        .expect_err("MAZET_ENV must name a block that exists")
+        .to_string();
+    assert!(
+        rendered.contains("unset MAZET_ENV"),
+        "the suggestion must name the key that asked: {rendered}"
+    );
+}

@@ -9,6 +9,10 @@
 //! 3. Otherwise a central store whose name is *derived* from the effective
 //!    identity — see [`derived_key`].
 //!
+//! `store` and `profile` are read from one layer as a unit: a local file that
+//! spells either of them replaces both, so an operator can step out of a
+//! committed `profile` the same way they step out of a committed identity.
+//!
 //! # Why the subscription is part of the key
 //!
 //! One store holds exactly one active subscription. `az` records the
@@ -141,13 +145,18 @@ pub fn resolve(
     let mut warnings = config.warnings.clone();
     warnings.extend(choice.warnings);
 
-    let shared_file = config.location.shared_file();
+    // `store` and `profile` come from one layer as a unit, so one path names
+    // the file either of them was read from.
+    let store_file = match config.local.as_ref() {
+        Some(local) if local.selects_a_store() => config.location.local_file(),
+        _ => config.location.shared_file(),
+    };
     let (store_path, source) = match (&effective.profile, effective.store) {
         // Rule 1. A named profile beats everything, including `store`.
         (Some(name), _) => {
             if !registry.contains(name) {
                 return Err(ResolveError::UnknownProfile {
-                    file: shared_file,
+                    file: store_file,
                     name: name.clone(),
                 });
             }
@@ -161,7 +170,7 @@ pub fn resolve(
             Some(path) => (path, StoreSource::Local),
             None => {
                 return Err(ResolveError::LocalStoreWithoutDirectory {
-                    file: shared_file,
+                    file: store_file,
                     path: config.location.path().to_path_buf(),
                 })
             }

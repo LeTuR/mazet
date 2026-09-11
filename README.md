@@ -119,7 +119,10 @@ it working for more than one person.** A shared config pinning `username` pins
 the author's identity on everyone who clones the repository. So `username`,
 `client_id`, `profile` and `store` are local-layer keys, and finding one of
 them in the shared layer is a warning naming the key — a repository with one
-operator is entitled to do it, but it has to be said out loud.
+operator is entitled to do it, but it has to be said out loud. `store` and
+`profile` are read from one layer as a unit, so a local file spelling either of
+them replaces both and a committed `profile` never overrides an operator who
+opted out.
 
 An operator who is one identity in a tenant on their own machine should not
 need a local file per repository, so the central registry may carry a

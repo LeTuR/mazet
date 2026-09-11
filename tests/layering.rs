@@ -362,3 +362,109 @@ fn the_derived_store_name_is_stable_across_calls() {
     assert_eq!(first.store, second.store);
     assert_eq!(first.source, second.source);
 }
+
+#[test]
+fn a_local_store_beats_a_shared_profile() {
+    let sandbox = Sandbox::new();
+    let mut registry = Registry::default();
+    let name = ProfileName::parse("client-a").unwrap();
+    registry.add(&name, ProfileEntry::default()).unwrap();
+
+    let shared = format!("{}profile = \"client-a\"\n", shared_toml());
+
+    let alice_tree = sandbox.tree();
+    let alice = sandbox.dir(&alice_tree, &shared);
+
+    let bob_tree = sandbox.other_tree();
+    let bob = sandbox.dir(&bob_tree, &shared);
+    sandbox.dir_local(&bob, "store = \"local\"\nusername = \"bob@corp.com\"\n");
+
+    let alice_store = resolve_at(&sandbox, &alice, &registry).unwrap();
+    let bob_store = resolve_at(&sandbox, &bob, &registry).unwrap();
+
+    assert_eq!(alice_store.source, StoreSource::Profile(name));
+    assert_eq!(
+        bob_store.source,
+        StoreSource::Local,
+        "a local `store` must beat a committed `profile`"
+    );
+    assert_ne!(
+        alice_store.store, bob_store.store,
+        "a committed `profile` must not pull an operator who opted out back into a shared store"
+    );
+}
+
+#[test]
+fn a_local_profile_beats_a_shared_profile() {
+    let sandbox = Sandbox::new();
+    let mut registry = Registry::default();
+    let shared_name = ProfileName::parse("client-a").unwrap();
+    let local_name = ProfileName::parse("client-b").unwrap();
+    registry.add(&shared_name, ProfileEntry::default()).unwrap();
+    registry.add(&local_name, ProfileEntry::default()).unwrap();
+
+    let tree = sandbox.tree();
+    let dir = sandbox.dir(&tree, &format!("{}profile = \"client-a\"\n", shared_toml()));
+    sandbox.dir_local(&dir, "profile = \"client-b\"\n");
+
+    let resolved = resolve_at(&sandbox, &dir, &registry).unwrap();
+    assert_eq!(resolved.source, StoreSource::Profile(local_name));
+}
+
+#[test]
+fn a_shared_store_choice_still_applies_when_the_local_layer_picks_none() {
+    let sandbox = Sandbox::new();
+    let tree = sandbox.tree();
+    let dir = sandbox.dir(&tree, &format!("{}store = \"local\"\n", shared_toml()));
+    sandbox.dir_local(&dir, "username = \"bob@corp.com\"\n");
+
+    let resolved = resolve_at(&sandbox, &dir, &Registry::default()).unwrap();
+    assert_eq!(resolved.source, StoreSource::Local);
+}
+
+#[test]
+fn a_local_layer_store_error_names_the_local_file() {
+    let sandbox = Sandbox::new();
+    let tree = sandbox.tree();
+    let path = sandbox.flat(&tree, &shared_toml());
+    sandbox.flat_local(&tree, "store = \"local\"\n");
+
+    let err = resolve_at(&sandbox, &path, &Registry::default())
+        .expect_err("a flat .mazet has nowhere to put a local store");
+    let rendered = err.to_string();
+    assert!(
+        rendered.contains(".mazet.local"),
+        "the error must name the file the key is actually in: {rendered}"
+    );
+}
+
+#[test]
+fn a_local_layer_profile_error_names_the_local_file() {
+    let sandbox = Sandbox::new();
+    let tree = sandbox.tree();
+    let path = sandbox.flat(&tree, &shared_toml());
+    sandbox.flat_local(&tree, "profile = \"ghost\"\n");
+
+    let err = resolve_at(&sandbox, &path, &Registry::default())
+        .expect_err("a config cannot name a profile that does not exist");
+    let rendered = err.to_string();
+    assert!(
+        rendered.contains(".mazet.local"),
+        "the error must name the file the key is actually in: {rendered}"
+    );
+}
+
+#[test]
+fn a_shared_layer_profile_error_names_the_shared_file() {
+    let sandbox = Sandbox::new();
+    let tree = sandbox.tree();
+    let dir = sandbox.dir(&tree, &format!("{}profile = \"ghost\"\n", shared_toml()));
+
+    let err = resolve_at(&sandbox, &dir, &Registry::default())
+        .expect_err("a config cannot name a profile that does not exist");
+    let rendered = err.to_string();
+    assert!(
+        rendered.contains("config.toml"),
+        "the error must name the file the key is actually in: {rendered}"
+    );
+}

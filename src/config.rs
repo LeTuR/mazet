@@ -590,9 +590,16 @@ impl ConfigError {
             }
             ConfigErrorKind::UnknownEnv { declared, .. } => {
                 if declared.is_empty() {
-                    "This config declares no environments; remove --env, or add an [env.<name>] \
-                     block."
-                        .into()
+                    let remedy = match self.key.as_deref() {
+                        Some("--env") => "remove --env".to_string(),
+                        Some("MAZET_ENV") => "unset MAZET_ENV".to_string(),
+                        Some(key) => format!("remove `{key}`"),
+                        None => "remove the selection".to_string(),
+                    };
+                    format!(
+                        "This config declares no environments; {remedy}, or add an \
+                         [env.<name>] block."
+                    )
                 } else {
                     format!("Declared environments: {}.", declared.join(", "))
                 }
@@ -665,6 +672,18 @@ pub struct Local {
     pub store: Option<StoreChoice>,
     /// A named profile's store to use.
     pub profile: Option<ProfileName>,
+}
+
+impl Local {
+    /// Whether this layer picks a store at all.
+    ///
+    /// `store` and `profile` are taken as a unit per layer, the same way the
+    /// identity is: an operator who writes either of them in their local file
+    /// is separating themselves from a committed config, and a shared
+    /// `profile` must not put them back in the shared store.
+    pub fn selects_a_store(&self) -> bool {
+        self.store.is_some() || self.profile.is_some()
+    }
 }
 
 /// A parsed `.mazet`, both layers, with whatever warnings reading it produced.
@@ -879,7 +898,9 @@ impl Config {
     /// `[env.*]` block, then the top-level shared keys, then the defaults.
     /// The identity is *not* final here — the registry's per-tenant default
     /// still applies when the local layer named nobody; [`crate::resolve`]
-    /// finishes that.
+    /// finishes that. `store` and `profile` are taken together from whichever
+    /// layer picks a store, so a committed `profile` cannot survive an
+    /// operator's local `store`.
     pub fn effective(&self, choice: &EnvChoice) -> Effective {
         let block = choice
             .name
@@ -914,16 +935,10 @@ impl Config {
             _ => (IdentityRef::default(), IdentitySource::None),
         };
 
-        let store = self
-            .local
-            .as_ref()
-            .and_then(|l| l.store)
-            .or(self.shared.store);
-        let profile = self
-            .local
-            .as_ref()
-            .and_then(|l| l.profile.clone())
-            .or_else(|| self.shared.profile.clone());
+        let (store, profile) = match self.local.as_ref() {
+            Some(local) if local.selects_a_store() => (local.store, local.profile.clone()),
+            _ => (self.shared.store, self.shared.profile.clone()),
+        };
 
         Effective {
             env: choice.name.clone(),
