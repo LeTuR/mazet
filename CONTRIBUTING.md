@@ -34,6 +34,12 @@ cargo install cocogitto # `cog`, the commit-message checker
 prek install           # wire the git hooks, once
 ```
 
+Two more if you touch the installers, from your package manager
+(`apt install shellcheck bats`, `brew install shellcheck bats-core`):
+`shellcheck` and `bats`. The `install.ps1` half of that pair is tested with
+[Pester](https://pester.dev) and runs in CI only, since `pwsh` is not something
+this repository asks you to install.
+
 ## The gate
 
 **`prek run --all-files` is this repository's gate.** Run it before you push;
@@ -47,6 +53,8 @@ runs too.
 | compile | `cargo check --all-targets --all-features` |
 | test | `cargo test --all-features` |
 | docs | `RUSTDOCFLAGS=-Dwarnings cargo doc --no-deps --all-features` |
+| shell | `shellcheck` on every tracked `*.sh` |
+| installer | `bats tests/install.bats` |
 | commits | `cog verify` on the message, and the history on pre-push |
 
 `cargo fmt --all` fixes the first one for you.
@@ -69,8 +77,9 @@ Types: `feat`, `fix`, `perf`, `refactor`, `docs`, `style`, `test`, `chore`,
 `build`, `ci`, `revert`. Scopes: `cli`, `config`, `store`, `az`, `docs`,
 `deps`, `ci`.
 
-The **pull request title** is held to the same rules by its own workflow, since
-it is what the release notes quote.
+The **pull request title** is held to the same rules by its own workflow,
+because under squash merges it is the commit that lands — see
+[Pull requests](#pull-requests).
 
 ```text
 feat(config): accept a .mazet directory as well as a file
@@ -79,29 +88,40 @@ fix(store): re-assert 0700 on a store whose mode drifted
 
 ## Pull requests
 
-**The remote takes rebase merges only** — merge commits and squash merges are
-both disabled on `github.com/LeTuR/mazet`. So:
+**The remote takes squash merges only** — rebase and merge commits are both
+disabled on `github.com/LeTuR/mazet`. So:
 
-- keep your branch rebased on `main` (`git pull --rebase`, and `pull.rebase` is
-  worth setting to `true` locally);
-- every commit on your branch lands on `main` as written, so every one of them
-  must be a well-formed conventional commit and should build on its own;
+- **the pull request title becomes the commit on `main`**, and nothing else on
+  the branch does. Write it as the one-line history entry it will be — and note
+  that its type is what decides the version the release workflow then cuts;
+- keep your branch rebased on `main` anyway (`git pull --rebase`, and
+  `pull.rebase` is worth setting to `true` locally), so what CI reviews is what
+  would land;
 - do not merge `main` into your branch.
+
+The commits on the branch are still held to `cog.toml` — they are what a
+reviewer reads — but they are not what history keeps.
 
 The branch is deleted on merge.
 
 ## Releasing
 
-A release is cut from a green `main`:
-
-```sh
-cog bump --auto          # decides the version from the commits, tags it
-git push --follow-tags
-```
-
-The tag is what starts [`cd.yml`](.github/workflows/cd.yml), which
+**Nobody cuts a release.** A `feat` or a `fix` merged to `main` becomes a tag
+and a published GitHub Release with no human action:
+[`release.yml`](.github/workflows/release.yml) asks `cog` whether a version is
+due, tags it, and starts [`cd.yml`](.github/workflows/cd.yml), which
 cross-compiles the five release targets, checksums the archives and publishes
-the GitHub Release.
+the release.
+
+So the pull request title you write is the version you cut — `feat` a minor,
+`fix` and `perf` a patch, everything else nothing at all. A merge titled
+`docs`, `chore`, `ci` or `refactor` finishes green and tags nothing.
+
+To land a change without releasing it, put `[skip release]` in that title.
+
+[`docs/RELEASING.md`](docs/RELEASING.md) has the rest: what triggers what and
+why the tag push alone is not enough, the five targets and their asset names,
+how to re-run a release whose build failed, and how the installers consume it.
 
 ## What not to put in this crate
 

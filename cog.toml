@@ -3,9 +3,9 @@
 # Version bumps happen on `main` only.
 branch_whitelist = ["main"]
 
-# Merge commits are not this repository's business: the remote takes rebase
-# merges only. The setting stays for the odd local merge that predates a
-# rebase.
+# Merge commits are not this repository's business: the remote takes squash
+# merges only, so the pull request title is the commit `cog bump --auto` reads.
+# The setting stays for the odd local merge.
 ignore_merge_commits = true
 
 # Scopes. `cli` is the command surface, `config` the `.mazet` format and the

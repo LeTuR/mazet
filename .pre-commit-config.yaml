@@ -65,6 +65,26 @@ repos:
         pass_filenames: false
         always_run: true
 
+      # Scoped by extension rather than by `types: [shell]`, so this runs over
+      # exactly what the CI job does (`git ls-files '*.sh'`) and the two cannot
+      # disagree. The bats suite is checked by running it, below.
+      - id: shellcheck
+        name: ShellCheck
+        entry: shellcheck
+        language: system
+        files: \.sh$
+
+      # install.sh's helpers, exercised rather than grepped for. There is no
+      # matching hook for install.ps1: its Pester suite needs `pwsh`, which is
+      # not something this repository asks a contributor to install, so that
+      # half runs in CI only.
+      - id: install-sh-tests
+        name: Installer tests (bats)
+        entry: bats tests/install.bats
+        language: system
+        files: ^(install\.sh|tests/install\.bats)$
+        pass_filenames: false
+
       - id: cocogitto-check
         name: Check commit history
         # Not `cog check`: it cannot exempt the no-mistakes gate's own fix
