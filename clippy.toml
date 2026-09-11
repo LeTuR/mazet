@@ -1,0 +1,15 @@
+# Keep in step with Cargo.toml's `rust-version`.
+msrv = "1.85"
+
+# `ConfigError` carries the file, the key and the underlying parse error,
+# which is the whole point of it: an error that cannot name the key it is
+# about is not worth returning. At ~136 bytes that trips the default
+# `result_large_err` threshold of 128, on a value produced at most a handful
+# of times per process. Raised rather than boxed, so the error stays a plain
+# struct a caller can match on.
+large-error-threshold = 256
+
+avoid-breaking-exported-api = false
+disallowed-names = ["foo", "bar", "baz"]
+too-many-arguments-threshold = 7
+type-complexity-threshold = 250
