@@ -1,17 +1,22 @@
 # Release: cross-compiled binaries for every supported target, attached to a
-# GitHub Release, on a tag.
+# GitHub Release, for one tag.
 #
-# The tag is what starts this, not a push to `main`. Cutting a release is
-# therefore `cog bump --auto && git push --follow-tags` from a green `main` —
-# see CONTRIBUTING.md — which keeps the decision to release a human one and
-# keeps this workflow to the one job it is good at.
+# A tag is what starts this, not a push to `main`, and this workflow neither
+# decides the version nor creates the tag — `release.yml` does both on every
+# push to `main` and then reaches this one through the `workflow_dispatch`
+# input below. It has to: GitHub raises no workflow run from a tag pushed with
+# the default `GITHUB_TOKEN`, so the `push: tags` trigger would never fire for
+# an automated cut. That trigger stays for a tag pushed by a human.
+#
+# See docs/RELEASING.md.
 name: Release
 
 on:
   push:
     tags: ["v*"]
-  # Re-run the build and upload for a tag that already exists, for when a
-  # release job failed on something that was not the code.
+  # The entry point `release.yml` uses, and the one to re-run by hand for a tag
+  # that already exists when a release job failed on something that was not the
+  # code.
   workflow_dispatch:
     inputs:
       tag:

@@ -1,0 +1,126 @@
+# Cut the tag. `cd.yml` does the rest.
+#
+# `cog.toml` already decides the version: `tag_prefix = "v"`, `feat` bumps the
+# minor and `fix`/`perf` the patch. The only human left in the loop was the one
+# typing `cog bump --auto`, and this is that human.
+#
+# Push to `main` -> is a version due? -> tag it -> start `cd.yml`.
+#
+#   main ──push──> release.yml ──cog bump --auto──> tag vX.Y.Z
+#                       │                              │
+#                       │                        git push origin
+#                       │                              │
+#                       └────── gh workflow run ───────┴──> cd.yml
+#                               (workflow_dispatch)          5 targets,
+#                                                            archives,
+#                                                            checksums,
+#                                                            GitHub Release
+#
+# Why the dispatch and not the tag push alone: GitHub does not start a workflow
+# run from an event raised with the default `GITHUB_TOKEN`. So a `v*` tag pushed
+# from here reaches the remote but never fires `cd.yml`'s `push: tags` trigger,
+# and the release would silently never build. `workflow_dispatch` is one of the
+# two documented exceptions to that rule -- "With the exception of
+# `workflow_dispatch` and `repository_dispatch`, other `GITHUB_TOKEN`-triggered
+# events do not create workflow runs at all" -- so it starts `cd.yml` with no
+# credential to store or rotate. The alternative, a PAT or a GitHub App
+# installation token with `contents: write`, is a secret this repository does
+# not have and would not otherwise need.
+#
+# That same rule is also half of why this cannot loop; the other half is that
+# this workflow triggers on `branches`, which a tag ref never matches.
+#
+# See docs/RELEASING.md.
+name: Tag Release
+
+on:
+  push:
+    branches: [main]
+
+# One tag cut at a time, and never cancel one that is half-way through pushing.
+concurrency:
+  group: tag-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  tag:
+    name: Tag release
+    # The deliberate skip. The remote squashes, so `head_commit` is the commit
+    # the merge put on `main` -- the pull request title. `[skip release]`
+    # anywhere in it lands the merge without a tag, and the change rides along
+    # with the next release.
+    if: ${{ !contains(github.event.head_commit.message, '[skip release]') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push the tag
+      actions: write # start cd.yml through workflow_dispatch
+    steps:
+      # `actions/checkout` puts a branch push on the branch itself, not on a
+      # detached HEAD, which is what `cog.toml`'s `branch_whitelist = ["main"]`
+      # requires. The full history is what `cog bump` reads to decide.
+      - name: Checkout main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Install cocogitto
+        uses: cocogitto/cocogitto-action@52d0023b4396897f1815648e553db2ab8d782f3a # v4.2.0
+        with:
+          install-only: true
+
+      - name: Is a version due
+        id: decide
+        run: |
+          # `cog bump --auto --dry-run` prints the next tag when one is due and
+          # a human-readable "No conventional commits..." sentence when none is
+          # -- on stdout, and exiting 0 either way (cocogitto 7.0.0). So the
+          # decision is "did it print a version", not "did it succeed": writing
+          # that sentence into $GITHUB_OUTPUT would fail this step on every
+          # docs-only or chore-only merge, which is exactly the case that has to
+          # stay green.
+          RAW="$(cog bump --auto --dry-run 2>/dev/null || true)"
+          echo "cog said: $RAW"
+          VERSION="$(printf '%s\n' "$RAW" \
+            | grep -oE '^v[0-9]+\.[0-9]+\.[0-9]+[0-9A-Za-z.+-]*' | head -1 || true)"
+          if [ -n "$VERSION" ]; then
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+            echo "::notice::Releasing $VERSION"
+          else
+            echo "version=" >> "$GITHUB_OUTPUT"
+            echo "::notice::Nothing to release: no commit since the last tag bumps a version."
+          fi
+
+      - name: Configure the tagger
+        if: steps.decide.outputs.version != ''
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+      # `--disable-bump-commit`: the tag is the whole point, and a bump commit
+      # pushed to `main` from CI would be a second commit nobody reviewed. cog
+      # still writes CHANGELOG.md into the working tree; it is never committed
+      # and the runner is thrown away. The GitHub Release's notes are generated
+      # by `cd.yml` from the same commits.
+      - name: Tag the release
+        if: steps.decide.outputs.version != ''
+        run: cog bump --auto --disable-bump-commit
+
+      - name: Push the tag
+        if: steps.decide.outputs.version != ''
+        run: git push origin "refs/tags/${{ steps.decide.outputs.version }}"
+
+      # The tag push above raises no workflow run (see the header), so say so
+      # explicitly. `cd.yml` resolves the release from this input, checks the
+      # tag out and builds it -- the same path a re-run of a failed release
+      # takes by hand.
+      - name: Start the release build
+        if: steps.decide.outputs.version != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run cd.yml --ref main \
+            -f tag="${{ steps.decide.outputs.version }}"
+          echo "::notice::Dispatched cd.yml for ${{ steps.decide.outputs.version }}: ${{ github.server_url }}/${{ github.repository }}/actions/workflows/cd.yml"
