@@ -144,20 +144,32 @@ fn no_mazet_anywhere_is_reported_with_the_directories_searched() {
     let sandbox = Sandbox::new();
     let deep = sandbox.subdir("nothing/here/at/all");
 
-    let out = sandbox.mazet(&deep).arg("which").output().expect("run");
+    // Asserted through `--json` and parsed back, not over the bytes on
+    // stdout: the default rendering down a pipe is TOON, whose quoted strings
+    // escape a backslash, so a raw substring search for a path never matches
+    // on Windows. The decoded field is the path the operator is shown.
+    let out = sandbox
+        .mazet(&deep)
+        .args(["which", "--json"])
+        .output()
+        .expect("run");
     // 3, not 1: the question was answered. The shell hook tells "no binding
     // here" from "the binding is broken" on exactly this.
     assert_eq!(out.status.code(), Some(3));
-    let text = String::from_utf8_lossy(&out.stdout);
-    assert!(text.contains("no .mazet in"), "{text}");
+    let json: serde_json::Value =
+        serde_json::from_slice(&out.stdout).expect("which --json is JSON, failure included");
+    let message = json["error"].as_str().expect("an error message");
+    let suggestion = json["suggestion"].as_str().expect("a suggestion");
+    assert!(message.contains("no .mazet in"), "{message}");
     for dir in [
         &deep,
         &sandbox.subdir("nothing/here"),
         &sandbox.subdir("nothing"),
     ] {
+        let named = dir.display().to_string();
         assert!(
-            text.contains(&dir.display().to_string()),
-            "the searched directory {} is not named:\n{text}",
+            message.contains(&named) || suggestion.contains(&named),
+            "the searched directory {} is not named:\n{message}\n{suggestion}",
             dir.display()
         );
     }
