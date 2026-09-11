@@ -46,6 +46,25 @@ Describe 'install.ps1 source' {
             Should -BeFalse
     }
 
+    It 'leaves the calling session preferences alone, since irm | iex runs in the user console' {
+        $probe = & {
+            $ErrorActionPreference = 'Continue'
+            $ProgressPreference = 'Continue'
+            $env:MAZET_PS_TEST = '1'
+            . $script:ScriptPath
+            $strict = $false
+            try { $null -eq $NeverAssignedVariable | Out-Null } catch { $strict = $true }
+            [pscustomobject]@{
+                ErrorAction = $ErrorActionPreference
+                Progress    = $ProgressPreference
+                Strict      = $strict
+            }
+        }
+        $probe.ErrorAction | Should -Be 'Continue'
+        $probe.Progress | Should -Be 'Continue'
+        $probe.Strict | Should -BeFalse
+    }
+
     It 'says nothing on stdout when dot-sourced, so it cannot pollute an iex pipeline' {
         $out = & {
             $env:MAZET_PS_TEST = '1'

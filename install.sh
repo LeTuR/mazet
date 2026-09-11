@@ -144,10 +144,13 @@ Nothing was installed."
 }
 
 # Is this exact directory a component of PATH? A substring test would call
-# ~/.local/bin present because ~/.local/bin/extra is.
+# ~/.local/bin present because ~/.local/bin/extra is, and a trailing separator
+# names the same directory rather than a different one.
 on_path() {
+    _op_dir="${1%/}"
+    [ -n "$_op_dir" ] || _op_dir="/"
     case ":${PATH:-}:" in
-        *":$1:"*) return 0 ;;
+        *":$_op_dir:"*) return 0 ;;
         *) return 1 ;;
     esac
 }

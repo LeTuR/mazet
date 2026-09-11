@@ -156,12 +156,12 @@ deliberate act: tag it by hand from a green `main`
 ```sh
 cog bump --version 1.0.0 --disable-bump-commit
 git push origin refs/tags/v1.0.0
-gh workflow run cd.yml --ref main -f tag=v1.0.0
 ```
 
-— the dispatch for the same reason as everywhere else, since a tag you push
-yourself from a terminal *does* trigger `cd.yml`, but one pushed from CI does
-not, and this way the two paths are the same three commands.
+— and no dispatch after it: a tag you push yourself from a terminal *does*
+trigger `cd.yml`, so dispatching as well would start a second run against the
+same tag and the two would race each other uploading the assets. Only a tag cut
+from CI needs the dispatch.
 
 ## Installing what came out
 
@@ -196,9 +196,9 @@ The knobs, for both:
 
 | | `install.sh` | `install.ps1` |
 |---|---|---|
-| pin a version | `MAZET_VERSION=v0.3.0` | `$env:MAZET_VERSION = 'v0.3.0'` or `-Version` |
-| choose a directory | `MAZET_INSTALL_DIR=~/bin` | `$env:MAZET_INSTALL_DIR` or `-InstallDir` |
-| install from a fork | `MAZET_REPO=you/mazet` | `$env:MAZET_REPO` or `-Repo` |
+| pin a version | `MAZET_VERSION=v0.3.0` | `$env:MAZET_VERSION = 'v0.3.0'` |
+| choose a directory | `MAZET_INSTALL_DIR=~/bin` | `$env:MAZET_INSTALL_DIR` |
+| install from a fork | `MAZET_REPO=you/mazet` | `$env:MAZET_REPO` |
 | default directory | `~/.local/bin` | `%LOCALAPPDATA%\Programs\mazet` |
 
 The names are prefixed on purpose: a bare `VERSION` left in the caller's

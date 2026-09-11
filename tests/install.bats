@@ -218,6 +218,11 @@ EOF
     [ "$status" -ne 0 ]
 }
 
+@test "on_path accepts a directory named with a trailing separator" {
+    run sourced "PATH=/usr/bin:/home/me/.local/bin:/bin on_path /home/me/.local/bin/"
+    [ "$status" -eq 0 ]
+}
+
 @test "on_path handles the first and last component" {
     run sourced "PATH=/home/me/.local/bin:/bin on_path /home/me/.local/bin"
     [ "$status" -eq 0 ]

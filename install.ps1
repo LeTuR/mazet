@@ -23,43 +23,26 @@
 .EXAMPLE
     irm https://raw.githubusercontent.com/LeTuR/mazet/main/install.ps1 | iex
 
-.EXAMPLE
-    .\install.ps1 -Version v0.1.0 -InstallDir C:\tools\mazet
-
 .NOTES
-    The pipe-to-iex form cannot pass parameters, so every option is also an
-    environment variable:
+    The pipe-to-iex form cannot pass parameters, so every option is an
+    environment variable, and prefixed, exactly as in install.sh:
       $env:MAZET_VERSION      = 'v0.1.0'
       $env:MAZET_INSTALL_DIR  = 'C:\tools\mazet'
       $env:MAZET_REPO         = 'LeTuR/mazet'
 #>
-
-[CmdletBinding()]
-param(
-    [string]$Version,
-    [string]$InstallDir,
-    [string]$Repo
-)
-
-Set-StrictMode -Version Latest
-$ErrorActionPreference = 'Stop'
 
 # Windows PowerShell 5.1 defaults to SSL3/TLS1.0, which github.com refuses.
 if ([Net.ServicePointManager]::SecurityProtocol -notmatch 'Tls12') {
     [Net.ServicePointManager]::SecurityProtocol =
         [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 }
-# Invoke-WebRequest's progress bar costs more than the download in 5.1.
-$ProgressPreference = 'SilentlyContinue'
 
-# Parameter beats environment variable beats default.
-if (-not $Repo) { $Repo = if ($env:MAZET_REPO) { $env:MAZET_REPO } else { 'LeTuR/mazet' } }
-if (-not $Version) { $Version = if ($env:MAZET_VERSION) { $env:MAZET_VERSION } else { '' } }
-if (-not $InstallDir) {
-    if ($env:MAZET_INSTALL_DIR) { $InstallDir = $env:MAZET_INSTALL_DIR }
-    elseif ($env:LOCALAPPDATA) { $InstallDir = Join-Path $env:LOCALAPPDATA 'Programs\mazet' }
-    else { $InstallDir = Join-Path $HOME '.mazet\bin' }
-}
+# Environment variable beats default.
+$Repo = if ($env:MAZET_REPO) { $env:MAZET_REPO } else { 'LeTuR/mazet' }
+$Version = if ($env:MAZET_VERSION) { $env:MAZET_VERSION } else { '' }
+if ($env:MAZET_INSTALL_DIR) { $InstallDir = $env:MAZET_INSTALL_DIR }
+elseif ($env:LOCALAPPDATA) { $InstallDir = Join-Path $env:LOCALAPPDATA 'Programs\mazet' }
+else { $InstallDir = Join-Path $HOME '.mazet\bin' }
 
 function Write-MazetInfo { param($Message) Write-Host "  $Message" }
 function Write-MazetWarn { param($Message) Write-Host "  $Message" -ForegroundColor Yellow }
@@ -209,6 +192,13 @@ function Install-MazetBinary {
 }
 
 function Invoke-MazetInstall {
+    # Set here, not at script scope: `irm | iex` runs the script in the console
+    # the user keeps on using. The callees inherit all three dynamically.
+    Set-StrictMode -Version Latest
+    $ErrorActionPreference = 'Stop'
+    # Invoke-WebRequest's progress bar costs more than the download in 5.1.
+    $ProgressPreference = 'SilentlyContinue'
+
     Write-Host 'mazet installer'
 
     $target = Get-MazetTarget
