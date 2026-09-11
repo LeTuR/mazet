@@ -1,0 +1,42 @@
+# The no-mistakes gate for mazet.
+#
+# `commands.*` are spelled out rather than left for the agent to detect. A gate
+# step has to be deterministic about what it executes: an empty key does not
+# mean "run something small", it means the agent decides what running the tests
+# looks like, and two runs of the same gate can then check different things.
+#
+# These keys are read from the DEFAULT BRANCH, so an edit here takes effect on
+# the change after the one that makes it.
+commands:
+  # The whole lint surface CI enforces, in the order that fails cheapest first.
+  # The rustdoc check is part of it: a broken intra-doc link is a CI failure
+  # like any other, and catching it here is the round-trip this step exists to
+  # prevent.
+  lint: >-
+    cargo fmt --all -- --check
+    && cargo clippy --all-targets --all-features -- -D warnings
+    && RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features
+
+  # Run before the push step commits agent fixes, so formatting never reaches
+  # lint dirty and costs an extra auto-fix round.
+  format: cargo fmt --all
+
+  # The suite, named explicitly. `--all-features` so it matches what clippy and
+  # CI compile; the crate is small enough that the build is warm by the time
+  # this runs.
+  test: cargo test --all-features
+
+# Generated, not authored: reviewing it reviews the resolver, not a decision.
+ignore_patterns:
+  - "Cargo.lock"
+
+# Review findings park for a human decision rather than being auto-applied, so
+# this repository does not inherit an operator's global override.
+auto_fix:
+  review: 0
+
+# ci.yml sets `cancel-in-progress: true`, so a cancelled check here almost
+# always means a newer push superseded it rather than provider flakiness.
+# Rerunning would restart work that was stopped on purpose.
+ci:
+  rerun_transient: 0

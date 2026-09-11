@@ -1,0 +1,43 @@
+#:schema https://docs.cocogitto.io/cog-schema.json
+
+# Version bumps happen on `main` only.
+branch_whitelist = ["main"]
+
+# Merge commits are not this repository's business: the remote takes rebase
+# merges only. The setting stays for the odd local merge that predates a
+# rebase.
+ignore_merge_commits = true
+
+# Scopes. `cli` is the command surface, `config` the `.mazet` format and the
+# registry, `store` the AZURE_CONFIG_DIR derivation and creation, `az` the
+# interaction with the Azure CLI itself.
+scopes = ["cli", "config", "store", "az", "docs", "deps", "ci"]
+
+tag_prefix = "v"
+
+# Git hooks are managed by prek (see .pre-commit-config.yaml).
+# Install with: prek install
+
+[commit_types]
+feat = { changelog_title = "Features", bump_minor = true, order = 0 }
+fix = { changelog_title = "Bug Fixes", bump_patch = true, order = 1 }
+perf = { changelog_title = "Performance Improvements", bump_patch = true, order = 2 }
+refactor = { changelog_title = "Refactoring", order = 3 }
+docs = { changelog_title = "Documentation", omit_from_changelog = false, order = 4 }
+style = { omit_from_changelog = true }
+test = { omit_from_changelog = true }
+chore = { omit_from_changelog = true }
+build = { changelog_title = "Build System", order = 5 }
+ci = { omit_from_changelog = true }
+revert = { changelog_title = "Reverts", order = 6 }
+
+[changelog]
+path = "CHANGELOG.md"
+template = "remote"
+remote = "github.com"
+repository = "mazet"
+owner = "LeTuR"
+
+authors = [
+    { signature = "LeTuR", username = "magicletur" },
+]
