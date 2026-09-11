@@ -37,12 +37,18 @@ fn no_flags_at_all_writes_a_valid_config_that_binds_the_tree_to_a_store() {
     let sandbox = Sandbox::new();
     let tree = sandbox.subdir("tree");
 
-    let printed = ok(&sandbox, &tree, &[]);
+    let printed = ok(&sandbox, &tree, &["--json"]);
     let config_path = tree.join(".mazet");
     assert!(config_path.is_file(), "a flat .mazet is written by default");
-    // It prints the file it wrote.
-    assert!(
-        printed.contains(&config_path.display().to_string()),
+    // It prints the file it wrote. The decoded field is what the operator is
+    // shown, so that is what is compared: a path searched for in the
+    // serialized bytes would miss a Windows path, whose separators the
+    // encoding escapes.
+    let doc: serde_json::Value =
+        serde_json::from_str(&printed).expect("init --json is a JSON document");
+    assert_eq!(
+        doc["config"],
+        config_path.to_string_lossy().as_ref(),
         "init must print the file it wrote:\n{printed}"
     );
 
