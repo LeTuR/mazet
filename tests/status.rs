@@ -280,11 +280,11 @@ fn the_human_block_separates_every_label_from_its_value() {
         let rest = &line[line.find(label).expect("the label") + label.len()..];
         let padding = rest.chars().take_while(|c| *c == ' ').count();
         assert!(padding > 0, "`{label}` runs into its value: `{line}`");
-        assert!(
-            !rest.trim().is_empty(),
-            "`{label}` has no value: `{line}`"
-        );
-        columns.push((label, line.find(label).expect("the label") + label.len() + padding));
+        assert!(!rest.trim().is_empty(), "`{label}` has no value: `{line}`");
+        columns.push((
+            label,
+            line.find(label).expect("the label") + label.len() + padding,
+        ));
     }
 
     let (_, first) = columns[0];
