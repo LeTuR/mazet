@@ -77,8 +77,9 @@ Types: `feat`, `fix`, `perf`, `refactor`, `docs`, `style`, `test`, `chore`,
 `build`, `ci`, `revert`. Scopes: `cli`, `config`, `store`, `az`, `docs`,
 `deps`, `ci`.
 
-The **pull request title** is held to the same rules by its own workflow, since
-it is what the release notes quote.
+The **pull request title** is held to the same rules by its own workflow,
+because under squash merges it is the commit that lands — see
+[Pull requests](#pull-requests).
 
 ```text
 feat(config): accept a .mazet directory as well as a file

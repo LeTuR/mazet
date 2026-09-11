@@ -139,6 +139,13 @@ Do not delete and re-push a tag to retrigger a build. A tag that has been
 published is what somebody's `MAZET_VERSION` pins and what a checksum file
 names; moving it makes both lie.
 
+**The *Tag Release* run is red and nothing was tagged.** `cog` exited
+non-zero, which is a dirty tree, a branch outside `branch_whitelist` or a
+malformed `cog.toml` — never "no version is due", which finishes green. Its own
+message is in the step's log; fix the cause and the next push to `main` cuts
+the tag that was missed, since the version is a function of the commits and not
+of that run.
+
 **The tag was cut but nothing built at all**, and the Actions tab shows no
 *Release* run: that is the `GITHUB_TOKEN` rule above, and it means the dispatch
 step did not run or was not permitted. Check that `release.yml`'s `tag` job
