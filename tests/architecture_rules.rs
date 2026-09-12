@@ -771,6 +771,33 @@ fn every_module_is_governed() {
     }
 }
 
+/// A `super::` path names the module it climbs to, however many segments deep.
+///
+/// The allowlist's other evidence is that it reports nothing on a clean tree,
+/// which a reference the extractor dropped produces just as well — and every
+/// `super::` written under `src/` today is a single segment, so no real file
+/// tells a climb apart from joining `super` on as though it were a module
+/// name. These three lines do: `super::super::az` from `cli::select` is the
+/// crossing to `az` that the longer spelling would otherwise hide, a lone
+/// `super::` still names a sibling, and in a module the crate root declares
+/// `super::` is the root.
+#[test]
+fn a_super_path_resolves_to_the_module_it_climbs_to() {
+    let targets = |src: &str, owner: &str| {
+        module_refs(src, owner)
+            .into_iter()
+            .map(|site| site.target)
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(targets("use super::super::az::Az;", "cli::select"), ["az"]);
+    assert_eq!(
+        targets("use super::login_cmd::LOGIN_EXAMPLES;", "cli::select"),
+        ["cli::login_cmd"]
+    );
+    assert_eq!(targets("use super::az::Az;", "config"), ["az"]);
+}
+
 /// **`src/az.rs` is the only module that starts a process.**
 ///
 /// This is the rule the allowlist can see the shape of but not the substance
