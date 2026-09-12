@@ -8,10 +8,14 @@
 # These keys are read from the DEFAULT BRANCH, so an edit here takes effect on
 # the change after the one that makes it.
 commands:
-  # The whole lint surface CI enforces, in the order that fails cheapest first.
+  # The Rust lint surface CI enforces, in the order that fails cheapest first.
   # The rustdoc check is part of it: a broken intra-doc link is a CI failure
   # like any other, and catching it here is the round-trip this step exists to
-  # prevent.
+  # prevent. CI's other jobs are deliberately not here, because they need
+  # toolchains this step cannot assume: shellcheck and bats belong to `prek run
+  # --all-files`, the commit-history check to its pre-push stage, and the
+  # PowerShell installer suite runs in CI only because `pwsh` is not something
+  # this repository asks a contributor to install.
   lint: >-
     cargo fmt --all -- --check
     && cargo clippy --all-targets --all-features -- -D warnings

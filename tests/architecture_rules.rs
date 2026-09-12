@@ -26,7 +26,8 @@
 //! — `crate::a`, and `super::a`, which resolves against the file's parent and
 //! is how the siblings in `src/cli/` actually reach each other. In a module
 //! the crate root declares, `super::` is the crate root, so it is read there
-//! too.
+//! too, and a repeated `super::` climbs one module further per segment rather
+//! than being read as a name.
 //!
 //! A reference along a module's own chain — itself, an ancestor, a descendant
 //! — is not an architecture edge and is not recorded. `cli::login_cmd` reading
@@ -579,15 +580,38 @@ fn is_path_tail(bytes: &[u8], pos: usize) -> bool {
     is_ident_char(prev) || prev == b':' || prev == b'$'
 }
 
+/// The absolute path a `super::`-relative one names, written in `owner`.
+///
+/// The scan has already consumed the first `super`, so the base is `owner`'s
+/// parent and every further leading `super` segment climbs one module more:
+/// `super::super::az` in `cli::select` is `az`, not `cli::super::az`. At the
+/// crate root there is nothing left to climb and the remainder is already
+/// absolute.
+fn climb_out(owner: &str, path: &str) -> String {
+    let mut base: Vec<&str> = owner.split("::").collect();
+    base.pop();
+    let mut rest = path;
+    while let Some(tail) = rest.strip_prefix("super::") {
+        base.pop();
+        rest = tail;
+    }
+    if base.is_empty() {
+        rest.to_string()
+    } else {
+        format!("{}::{rest}", base.join("::"))
+    }
+}
+
 /// Every module reference in `stripped`, as seen from module `owner`.
 ///
 /// `crate::` names a module absolutely; `super::` names one relative to
 /// `owner`'s parent — which is how the modules in `src/cli/` reach each other
-/// — or, in a module the crate root declares, the root itself.
+/// — or, in a module the crate root declares, the root itself. A repeated
+/// `super::` climbs once more per segment, so no crossing hides behind the
+/// longer spelling.
 fn module_refs(stripped: &str, owner: &str) -> Vec<RefSite> {
     let bytes = stripped.as_bytes();
     let uses = use_spans(stripped);
-    let parent = owner.rsplit_once("::").map(|(head, _)| head.to_string());
     let mut refs = Vec::new();
 
     for token in ["crate::", "super::"] {
@@ -602,9 +626,10 @@ fn module_refs(stripped: &str, owner: &str) -> Vec<RefSite> {
             let in_use = uses.iter().any(|&(s, e)| pos >= s && pos < e);
             let mut after = pos + token.len();
             for path in paths_at(bytes, &mut after) {
-                let absolute = match &parent {
-                    Some(parent) if relative => format!("{parent}::{path}"),
-                    _ => path,
+                let absolute = if relative {
+                    climb_out(owner, &path)
+                } else {
+                    path
                 };
                 if let Some(target) = resolve_module(&absolute) {
                     refs.push(RefSite {
@@ -744,6 +769,33 @@ fn every_module_is_governed() {
             );
         }
     }
+}
+
+/// A `super::` path names the module it climbs to, however many segments deep.
+///
+/// The allowlist's other evidence is that it reports nothing on a clean tree,
+/// which a reference the extractor dropped produces just as well — and every
+/// `super::` written under `src/` today is a single segment, so no real file
+/// tells a climb apart from joining `super` on as though it were a module
+/// name. These three lines do: `super::super::az` from `cli::select` is the
+/// crossing to `az` that the longer spelling would otherwise hide, a lone
+/// `super::` still names a sibling, and in a module the crate root declares
+/// `super::` is the root.
+#[test]
+fn a_super_path_resolves_to_the_module_it_climbs_to() {
+    let targets = |src: &str, owner: &str| {
+        module_refs(src, owner)
+            .into_iter()
+            .map(|site| site.target)
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(targets("use super::super::az::Az;", "cli::select"), ["az"]);
+    assert_eq!(
+        targets("use super::login_cmd::LOGIN_EXAMPLES;", "cli::select"),
+        ["cli::login_cmd"]
+    );
+    assert_eq!(targets("use super::az::Az;", "config"), ["az"]);
 }
 
 /// **`src/az.rs` is the only module that starts a process.**
