@@ -4,8 +4,8 @@
 #   prek run --all-files  # the gate, on demand
 #
 # Every hook is `language: system`: the toolchain is rust-toolchain.toml's and
-# the binaries are the ones CONTRIBUTING.md asks you to install, so a hook runs
-# exactly what CI runs rather than a copy prek built for itself.
+# the binaries are the ones docs/DEVELOPMENT.md asks you to install, so a hook
+# runs exactly what CI runs rather than a copy prek built for itself.
 default_stages: [pre-commit]
 default_install_hook_types:
   - commit-msg

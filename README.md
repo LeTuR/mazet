@@ -11,6 +11,10 @@ profile applies from the current directory — so `az` in `~/work/client-a`
 speaks as one identity and `az` in `~/work/client-b` as another, at the same
 time, with no re-login between them.
 
+Everything below is how to use it. [`docs/`](docs/README.md) is why it works
+this way — the decisions, the feature design, and the complete configuration
+reference.
+
 ## Install
 
 Linux and macOS:
@@ -406,6 +410,9 @@ script rather than a `.exe`, so `mazet` walks `PATH` itself and tries each
 
 ## The `.mazet` format
 
+The shape of it is below; [`docs/CONFIG.md`](docs/CONFIG.md) is the complete
+reference — every key, the precedence tables, and the letter-case rules.
+
 A directory tree declares which identity it belongs to with a `.mazet` at its
 root, written either way:
 
@@ -645,7 +652,8 @@ gets their own two stores. The committed file never mentions either of you.
 Whatever is absent simply does not contribute to the key, and the key is stable
 across runs. Two clones of one infra repository on a machine therefore share a
 login; one operator's two identities in the same tenant do not collide, because
-their local files name them.
+their local files name them. The exact derivation is in
+[`docs/CONFIG.md`](docs/CONFIG.md#the-derived-store-key).
 
 ## Where mazet keeps things
 
@@ -670,11 +678,21 @@ tenant = "00000000-0000-0000-0000-000000000000"   # a note; it selects nothing
 username = "me@corp.com"
 ```
 
-## Status
+## Why it works this way
 
-The crate, the pipelines, the profile model, directory resolution (`init`,
-`which`, the walk up to a `.mazet`, the shell hooks) and the `az` interaction
-(`login` in every mode, `logout`, `exec`, `env` and `status`) are in place.
+This README is the tour. [`docs/`](docs/README.md) is the reasoning behind it,
+one owner per subject:
+
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — the `az` constraint
+  everything follows from, the module layering a test enforces, and the
+  credential boundary.
+- [`docs/FEATURES.md`](docs/FEATURES.md) — why a `.mazet` is two layers, why
+  every field is optional, why the hook unexports on the way out.
+- [`docs/CONFIG.md`](docs/CONFIG.md) — the complete reference: every key, every
+  variable, the precedence tables, and the store-key derivation.
+- [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) — building, testing and the
+  gates.
+- [`docs/RELEASING.md`](docs/RELEASING.md) — how a merge becomes a release.
 
 ## Contributing
 
