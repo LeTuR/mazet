@@ -12,10 +12,12 @@ picks it up on its own.
 
 **MSRV is 1.85, Edition 2021**, declared in three places that have to agree:
 [`Cargo.toml`](../Cargo.toml) (`rust-version`, what cargo enforces),
-[`clippy.toml`](../clippy.toml) (`msrv`, what clippy lints against) and
-[`CONTRIBUTING.md`](../CONTRIBUTING.md) (what a contributor reads). The pinned
-toolchain is deliberately *stable* and not the MSRV: the floor is what a
-consumer needs, and gating against it would mean losing every lint and
+[`clippy.toml`](../clippy.toml) (`msrv`, what clippy lints against) and this
+document (what a contributor reads). 1.85 is the floor clap 4.6 and toml 1.1
+impose; nothing in this crate needs anything newer.
+
+The pinned toolchain is deliberately *stable* and not the MSRV: the floor is
+what a consumer needs, and gating against it would mean losing every lint and
 diagnostic newer than it.
 
 Two extra binaries:

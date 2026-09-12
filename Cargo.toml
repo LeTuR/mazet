@@ -3,9 +3,9 @@ name = "mazet"
 version = "0.1.0"
 edition = "2021"
 # MSRV, declared in three places that have to agree: here (what cargo
-# enforces), `clippy.toml` (what clippy lints against) and CONTRIBUTING.md
-# (what a contributor reads). 1.85 is the floor clap 4.6 and toml 1.1 impose;
-# nothing in this crate needs anything newer.
+# enforces), `clippy.toml` (what clippy lints against) and
+# docs/DEVELOPMENT.md (what a contributor reads). 1.85 is the floor clap 4.6
+# and toml 1.1 impose; nothing in this crate needs anything newer.
 rust-version = "1.85"
 authors = ["LeTuR <magicletur@protonmail.com>"]
 license = "MIT"
