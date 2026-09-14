@@ -37,9 +37,8 @@ this repository asks you to install.
 ## The gate
 
 **`prek run --all-files` is this repository's gate.** It is the same set of
-checks CI runs and what the `no-mistakes` pipeline runs, and the hooks are all
-`language: system` so each one executes the same binary CI does rather than a
-copy `prek` built for itself.
+checks CI runs, and the hooks are all `language: system` so each one executes
+the same binary CI does rather than a copy `prek` built for itself.
 
 | | what it runs |
 |---|---|
@@ -61,6 +60,16 @@ links, and a broken one is a CI failure like any other.
 The suite runs on Linux, macOS and Windows in CI, because the store layout and
 its permissions differ per platform and a Linux-only run would assert the other
 two only by hope.
+
+[`.publish.yaml`](../.publish.yaml) declares this gate to the
+[`publish`](https://github.com/LeTuR/publish) skill, which is what an agent runs
+instead of pushing by hand. Its three steps are the Rust lint surface, the
+suite, and `prek run --all-files` last, so the cheap failures land first and the
+widest step — the one that also reaches `cargo check`, `shellcheck` and `bats` —
+runs against a warm cache. The two `cog` hooks stay where they are: `--all-files`
+is the pre-commit stage, and they fire on `commit-msg` and `pre-push`. That
+file's own comments say why each step is worded the way it is;
+[`CONTRIBUTING.md`](../CONTRIBUTING.md) owns what a contributor does with it.
 
 ## The test suite
 

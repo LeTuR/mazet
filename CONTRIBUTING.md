@@ -24,8 +24,15 @@ technical merits, and help newcomers find their footing.
 ## The toolchain and the gate
 
 **`prek run --all-files` is this repository's gate.** Run it before you push;
-it is the same set of checks CI runs, and it is what the `no-mistakes` pipeline
-runs too.
+it is the same set of checks CI runs.
+
+[`.publish.yaml`](.publish.yaml) declares that gate to the
+[`publish`](https://github.com/LeTuR/publish) skill, which is how an agent takes
+a branch out: it reviews the change against the documents that file lists, runs
+the steps it names — the Rust lint surface, the suite, then `prek run
+--all-files` — opens the pull request and waits for CI. Push by hand and you run
+the same commands yourself. The checks do not change with who runs them; only
+what drives them does.
 
 [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) has the rest and is where those
 facts live: the toolchain and the MSRV, the binaries to install first, what
