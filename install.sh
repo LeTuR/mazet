@@ -129,7 +129,10 @@ checksum_for() {
             break
         fi
     done <"$1"
-    [ -n "$_cf_hash" ] || die "$_cf_want is not listed in the checksum file. The release may still be uploading; check https://github.com/$MAZET_REPO/releases"
+    [ -n "$_cf_hash" ] || die "$_cf_want is not among that release's assets.
+  A release still uploading will list it shortly, so try again in a moment.
+  A release cut before mazet built that target never will, so install a newer
+  tag. Which one it is shows at https://github.com/$MAZET_REPO/releases"
     printf '%s\n' "$_cf_hash"
 }
 
@@ -269,10 +272,17 @@ main() {
     say "  fetching  $_m_archive"
     fetch "$_m_base/mazet-$_m_version-checksums.txt" "$MAZET_TMP/checksums.txt" ||
         die "no checksum file for $_m_version. Check https://github.com/$MAZET_REPO/releases/tag/$_m_version"
+
+    # The checksum file is the release's asset list, so ask it whether this
+    # platform's archive is there before spending a download finding out. A tag
+    # that carries no build for this target is a different problem from a
+    # download that failed, and only this order can tell the caller which one
+    # happened -- a release cut before a target existed 404s exactly like a
+    # network fault otherwise.
+    _m_expected=$(checksum_for "$MAZET_TMP/checksums.txt" "$_m_archive")
+
     fetch "$_m_base/$_m_archive" "$MAZET_TMP/$_m_archive" ||
         die "could not download $_m_archive. Check https://github.com/$MAZET_REPO/releases/tag/$_m_version"
-
-    _m_expected=$(checksum_for "$MAZET_TMP/checksums.txt" "$_m_archive")
     verify_checksum "$MAZET_TMP/$_m_archive" "$_m_expected"
     say "  verified  sha256 $_m_expected"
 

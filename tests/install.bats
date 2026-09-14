@@ -179,6 +179,23 @@ EOF
     [[ "$output" == *"aarch64-apple-darwin"* ]]
 }
 
+# install.sh resolves Linux to musl, and the fixture above is the asset list of
+# a release cut before mazet built a musl target -- v0.1.0's shape exactly. The
+# checksum file is that asset list, so this is where the mismatch surfaces, and
+# it has to surface as "that release does not carry it", not as a download that
+# happened to fail.
+@test "a release carrying no musl asset is refused by name" {
+    checksums_fixture
+    run sourced "
+        target=\$(resolve_target Linux x86_64)
+        checksum_for '$BATS_TEST_TMPDIR/checksums.txt' \"mazet-v1.2.3-\$target.tar.gz\"
+    "
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"mazet-v1.2.3-x86_64-unknown-linux-musl.tar.gz"* ]]
+    [[ "$output" == *"cut before mazet built that target"* ]]
+    [[ "$output" == *"install a newer"* ]]
+}
+
 @test "checksum_for does not match a name by prefix" {
     # `mazet-v1.2.3-x86_64-unknown-linux-gnu.tar.gz` is in the file; a request
     # for a longer name that starts the same way must not resolve to it.
