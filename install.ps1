@@ -9,7 +9,7 @@
     mazet.exe into an install directory, naming that directory and what to add
     to PATH when it is not already there.
 
-    The mirror of install.sh, which covers Linux and macOS. The five target
+    The mirror of install.sh, which covers Linux and macOS. The seven target
     triples, the archive names and the checksum file are
     .github/workflows/cd.yml's output and are the contract between the two;
     see docs/RELEASING.md.

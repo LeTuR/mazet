@@ -1,7 +1,7 @@
 # Releasing mazet
 
 Nobody cuts a release. A `feat` or a `fix` merged to `main` becomes a tag,
-which becomes five cross-compiled archives, a checksum file and a published
+which becomes seven cross-compiled archives, a checksum file and a published
 GitHub Release, and the one-line installers resolve that release the moment it
 exists.
 
@@ -40,9 +40,9 @@ that lands on `main`** — and therefore the thing that decides the version.
     v                              v
   .github/workflows/cd.yml                 "Release"
     |
-    |-- build x 5 targets, one archive each
+    |-- build x 7 targets, one archive each
     |-- sha256sum every archive into one checksums file
-    '-- publish the GitHub Release with all six assets
+    '-- publish the GitHub Release with all eight assets
 ```
 
 ### Why the dispatch, and not the tag push
@@ -85,21 +85,25 @@ green, and no tag is created.
 
 ## What a release consists of
 
-Five targets, built by `cd.yml`'s matrix:
+Seven targets, built by `cd.yml`'s matrix:
 
 | target | built on | with |
 |---|---|---|
 | `x86_64-unknown-linux-gnu` | `ubuntu-latest` | `cargo` |
 | `aarch64-unknown-linux-gnu` | `ubuntu-latest` | `cross` |
+| `x86_64-unknown-linux-musl` | `ubuntu-latest` | `cross` |
+| `aarch64-unknown-linux-musl` | `ubuntu-latest` | `cross` |
 | `x86_64-apple-darwin` | `macos-latest` | `cargo` |
 | `aarch64-apple-darwin` | `macos-latest` | `cargo` |
 | `x86_64-pc-windows-msvc` | `windows-latest` | `cargo` |
 
-Six assets, named after the tag:
+Eight assets, named after the tag:
 
 ```text
 mazet-<tag>-x86_64-unknown-linux-gnu.tar.gz
 mazet-<tag>-aarch64-unknown-linux-gnu.tar.gz
+mazet-<tag>-x86_64-unknown-linux-musl.tar.gz
+mazet-<tag>-aarch64-unknown-linux-musl.tar.gz
 mazet-<tag>-x86_64-apple-darwin.tar.gz
 mazet-<tag>-aarch64-apple-darwin.tar.gz
 mazet-<tag>-x86_64-pc-windows-msvc.zip
@@ -119,6 +123,42 @@ Because `sha256sum` is run from inside the assets directory over `./*.tar.gz`,
 the names inside the checksum file carry a `./` prefix. Both installers strip
 it, and both also strip the `*` that `sha256sum -b` would write.
 
+### Why both Linux libcs, and which one an installer picks
+
+A gnu binary carries a floor: the glibc it was linked against, and never
+anything older. Whatever distro the release runner happens to be sets it for
+everyone. `ubuntu-latest` moving to 24.04 (glibc 2.39) is how `v0.1.0`'s
+`x86_64-unknown-linux-gnu` asset came to fail on Debian 12 (glibc 2.36) with
+
+```text
+mazet: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.39' not found (required by mazet)
+```
+
+after an install that had just reported success — the message is the dynamic
+linker's, and it arrives at first run, not at install time.
+
+A musl build is statically linked and has no floor at all. So:
+
+- **`install.sh` installs the musl build on Linux, always**, for both
+  architectures. It is the only choice that is safe on a machine the installer
+  knows nothing about, and mazet wants nothing glibc gives and musl does not:
+  it spawns processes and reads directories, and does no name resolution.
+- **The gnu archives stay published.** They are not wrong, they are just not
+  what to hand an unknown machine. Take one from the releases page if you have
+  a reason to prefer it.
+- `install.ps1` has no equivalent decision to make: Windows has one target,
+  `x86_64-pc-windows-msvc`.
+
+`install.sh` also runs `mazet --version` on the binary it just placed and
+refuses to report success if it does not start, so a floor problem that ever
+returns is reported by the installer in its own words rather than by the
+linker, a shell session later.
+
+One consequence of the switch: on Linux `MAZET_VERSION` cannot pin a release
+cut before the musl archives existed. `v0.1.0` has none, so `install.sh` names
+the missing asset and stops. Take a gnu archive from that release's page by
+hand if you need that exact version.
+
 ## When a release fails
 
 The build failed on something that was not the code — a runner outage, a
@@ -132,7 +172,7 @@ gh workflow run cd.yml --ref main -f tag=v0.3.0
 ```
 
 or the same thing from the Actions tab: **Release** → *Run workflow* → put the
-tag in the `tag` box. It checks that tag out, rebuilds all five targets,
+tag in the `tag` box. It checks that tag out, rebuilds all seven targets,
 re-checksums them and updates the release. Running it twice is safe.
 
 Do not delete and re-push a tag to retrigger a build. A tag that has been
@@ -188,6 +228,13 @@ Both resolve the latest release, download the archive for the platform they
 detect, **verify it against `mazet-<tag>-checksums.txt` before unpacking it**,
 and put the binary somewhere on `PATH`, naming the directory and what to add if
 it is not.
+
+`install.sh` reads that checksum file before it downloads anything, because it
+doubles as the release's asset list: a tag that carries no archive for the
+detected target is then refused by name instead of failing like a network
+fault. It also runs the binary once it is in place, and an install whose binary
+does not start is a failed install — see [Why both Linux libcs, and which one
+an installer picks](#why-both-linux-libcs-and-which-one-an-installer-picks).
 
 Both refuse rather than guess. An architecture with no build, a 32-bit Windows,
 a system that is neither Linux nor macOS nor Windows: the message names what
