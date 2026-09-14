@@ -11,7 +11,7 @@
 #                       │                        git push origin
 #                       │                              │
 #                       └────── gh workflow run ───────┴──> cd.yml
-#                               (workflow_dispatch)          5 targets,
+#                               (workflow_dispatch)          7 targets,
 #                                                            archives,
 #                                                            checksums,
 #                                                            GitHub Release

@@ -37,23 +37,36 @@ sourced() {
 
 # --- resolve_target ---------------------------------------------------------
 
-@test "resolve_target maps Linux x86_64 to the gnu target" {
+# A gnu build carries a glibc floor -- the version it was linked against, and
+# never anything older -- so the runner that builds it decides which distros
+# can run it. v0.1.0's x86_64 gnu asset was built on glibc 2.39 and would not
+# start on Debian 12. The musl builds are statically linked and have no floor,
+# which is the only property that makes an unknown machine a safe target.
+@test "resolve_target maps Linux x86_64 to the musl target" {
     run sourced "resolve_target Linux x86_64"
     [ "$status" -eq 0 ]
-    [ "$output" = "x86_64-unknown-linux-gnu" ]
+    [ "$output" = "x86_64-unknown-linux-musl" ]
 }
 
-@test "resolve_target maps Linux aarch64 to the gnu target" {
+@test "resolve_target maps Linux aarch64 to the musl target" {
     run sourced "resolve_target Linux aarch64"
     [ "$status" -eq 0 ]
-    [ "$output" = "aarch64-unknown-linux-gnu" ]
+    [ "$output" = "aarch64-unknown-linux-musl" ]
 }
 
 @test "resolve_target maps Linux arm64 and amd64, the names some unames use" {
     run sourced "resolve_target Linux arm64"
-    [ "$output" = "aarch64-unknown-linux-gnu" ]
+    [ "$output" = "aarch64-unknown-linux-musl" ]
     run sourced "resolve_target Linux amd64"
-    [ "$output" = "x86_64-unknown-linux-gnu" ]
+    [ "$output" = "x86_64-unknown-linux-musl" ]
+}
+
+@test "resolve_target never hands a Linux machine a glibc-linked build" {
+    for arch in x86_64 amd64 aarch64 arm64; do
+        run sourced "resolve_target Linux $arch"
+        [ "$status" -eq 0 ]
+        [[ "$output" != *"-gnu" ]]
+    done
 }
 
 @test "resolve_target maps macOS arm64, which is what uname -m says there" {
@@ -292,6 +305,56 @@ release_archive() {
     [ ! -e "$BATS_TEST_TMPDIR/bin/mazet" ]
 }
 
+# --- verify_runs ------------------------------------------------------------
+
+# The failure this guards against arrives *after* a successful install: the
+# dynamic linker refuses a binary whose glibc floor is above this machine's,
+# and says so in its own words, naming neither mazet nor the installer.
+
+@test "verify_runs accepts a binary that starts and reports its version" {
+    printf '#!/bin/sh\necho "mazet 1.2.3"\n' >"$BATS_TEST_TMPDIR/works"
+    chmod +x "$BATS_TEST_TMPDIR/works"
+    run sourced "verify_runs '$BATS_TEST_TMPDIR/works' v1.2.3"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"mazet 1.2.3"* ]]
+}
+
+@test "verify_runs refuses a binary that cannot start, in its own words" {
+    # What Debian 12 printed for the v0.1.0 gnu asset.
+    printf '#!/bin/sh\n' >"$BATS_TEST_TMPDIR/broken"
+    printf '%s\n' 'echo "mazet: /lib/x86_64-linux-gnu/libc.so.6: version \`GLIBC_2.39'"'"' not found (required by mazet)" >&2' \
+        >>"$BATS_TEST_TMPDIR/broken"
+    printf 'exit 1\n' >>"$BATS_TEST_TMPDIR/broken"
+    chmod +x "$BATS_TEST_TMPDIR/broken"
+    run sourced "verify_runs '$BATS_TEST_TMPDIR/broken' v1.2.3"
+    [ "$status" -ne 0 ]
+    # Its own explanation, not just the linker's line.
+    [[ "$output" == *"does not run on this machine"* ]]
+    # And the linker's line too, because that is the evidence for a bug report.
+    [[ "$output" == *"GLIBC_2.39"* ]]
+}
+
+# main() reads the version out of a command substitution, and an `exit` inside
+# one only leaves the subshell -- the trap this file's require_tools comment
+# already describes. Under `set -eu` the failing assignment has to take the
+# whole script down, not print an error and carry on to "is installed at".
+@test "verify_runs failing inside a command substitution stops the script" {
+    printf '#!/bin/sh\necho "linker said no" >&2\nexit 1\n' >"$BATS_TEST_TMPDIR/broken"
+    chmod +x "$BATS_TEST_TMPDIR/broken"
+    run sourced "
+        reported=\$(verify_runs '$BATS_TEST_TMPDIR/broken' v1.2.3)
+        echo \"KEPT GOING: \$reported\"
+    "
+    [ "$status" -ne 0 ]
+    [[ "$output" != *"KEPT GOING"* ]]
+}
+
+@test "verify_runs refuses a file that is not executable at all" {
+    printf 'not a binary\n' >"$BATS_TEST_TMPDIR/notexec"
+    run sourced "verify_runs '$BATS_TEST_TMPDIR/notexec' v1.2.3"
+    [ "$status" -ne 0 ]
+}
+
 # --- the whole download-verify-install path ---------------------------------
 
 @test "a verified archive installs, and a tampered one does not" {
@@ -320,4 +383,21 @@ release_archive() {
     "
     [ "$status" -ne 0 ]
     [ ! -e "$BATS_TEST_TMPDIR/bin/mazet" ]
+}
+
+@test "an archive whose binary cannot start is not reported as installed" {
+    # The v0.1.0 bug end to end: checksum good, extraction good, and the thing
+    # still does not run. The installer has to be the one that says so.
+    mkdir -p "$BATS_TEST_TMPDIR/src" "$BATS_TEST_TMPDIR/stage"
+    printf '#!/bin/sh\necho "linker said no" >&2\nexit 1\n' >"$BATS_TEST_TMPDIR/src/mazet"
+    printf 'MIT\n' >"$BATS_TEST_TMPDIR/src/LICENSE"
+    printf '# mazet\n' >"$BATS_TEST_TMPDIR/src/README.md"
+    tar -czf "$BATS_TEST_TMPDIR/broken.tar.gz" -C "$BATS_TEST_TMPDIR/src" mazet LICENSE README.md
+
+    run sourced "
+        install_binary '$BATS_TEST_TMPDIR/broken.tar.gz' '$BATS_TEST_TMPDIR/bin' '$BATS_TEST_TMPDIR/stage'
+        verify_runs '$BATS_TEST_TMPDIR/bin/mazet' v1.2.3
+    "
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"does not run on this machine"* ]]
 }

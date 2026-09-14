@@ -1,15 +1,24 @@
-# `cross` builds the Linux release targets in a container, so the binary links
-# against the container's glibc rather than the GitHub runner's — which is what
-# makes an `aarch64-unknown-linux-gnu` artifact from an x86-64 runner possible
-# at all, and what keeps the x86-64 one usable on an older distro than the
-# runner.
+# `cross` builds the Linux release targets in a container, so the toolchain is
+# the image's and not the GitHub runner's — which is what makes an
+# `aarch64-*` artifact from an x86-64 runner possible at all, and what keeps a
+# gnu artifact usable on an older distro than the runner.
 #
 # The image is named explicitly rather than left to cross's default. `main` is
 # a moving tag: a rebuilt image can raise the glibc floor of a release without
 # a single line of this repository changing, and the first anyone would know is
 # a user reporting `GLIBC_2.xx not found`. 0.2.5 is the current cross release.
+# Pinned by tag rather than by digest, to match the line that was already here.
 [target.aarch64-unknown-linux-gnu]
 image = "ghcr.io/cross-rs/aarch64-unknown-linux-gnu:0.2.5"
+
+# The musl targets, for the same reason and then some: these are the archives
+# install.sh hands a Linux machine, so the image that builds them is the one
+# thing between a user and a binary that will not start.
+[target.x86_64-unknown-linux-musl]
+image = "ghcr.io/cross-rs/x86_64-unknown-linux-musl:0.2.5"
+
+[target.aarch64-unknown-linux-musl]
+image = "ghcr.io/cross-rs/aarch64-unknown-linux-musl:0.2.5"
 
 [build.env]
 # cd.yml sets it, and a build that logs in colour in CI is easier to read.

@@ -32,16 +32,22 @@ irm https://raw.githubusercontent.com/LeTuR/mazet/main/install.ps1 | iex
 Either one detects your platform, **verifies the download against the release's
 `sha256` checksum file before unpacking it**, and puts `mazet` in
 `~/.local/bin` — `%LOCALAPPDATA%\Programs\mazet` on Windows — naming the
-directory and what to add to `PATH` if it is not already there. An architecture
-with no build is refused by name rather than guessed at. Pin a version with
-`MAZET_VERSION=v0.3.0` or choose a directory with `MAZET_INSTALL_DIR`; the rest
-of the knobs are in [`docs/RELEASING.md`](docs/RELEASING.md).
+directory and what to add to `PATH` if it is not already there. It then runs
+the binary it just placed, so an install that reports success is one that
+works. An architecture with no build is refused by name rather than guessed at.
+Pin a version with `MAZET_VERSION=v0.3.0` or choose a directory with
+`MAZET_INSTALL_DIR`; the rest of the knobs are in
+[`docs/RELEASING.md`](docs/RELEASING.md).
+
+On Linux the installer takes the **musl** build. It is statically linked, so it
+runs on any glibc — Debian 12 included — rather than only on one as new as the
+machine that built it.
 
 Or take the archive for your platform from the
 [releases page](https://github.com/LeTuR/mazet/releases) and put `mazet` on
-your `PATH` yourself. Archives are published for Linux (x86-64, arm64), macOS
-(Intel, Apple silicon) and Windows (x86-64), with a `sha256` checksum file
-beside them.
+your `PATH` yourself. Archives are published for Linux (x86-64 and arm64, musl
+and glibc), macOS (Intel, Apple silicon) and Windows (x86-64), with a `sha256`
+checksum file beside them.
 
 From source, with Rust 1.85 or newer:
 

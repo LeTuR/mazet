@@ -56,6 +56,18 @@ jobs:
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             use_cross: true
+          # The musl pair is what install.sh hands a Linux machine, and the
+          # reason both exist. A gnu binary carries a floor -- the glibc it was
+          # linked against and never anything older -- so `ubuntu-latest`
+          # moving to 24.04 silently put the x86_64 gnu asset out of reach of
+          # Debian 12. These are statically linked and have no floor, so the
+          # runner's distro stops deciding who can run the release.
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            use_cross: true
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            use_cross: true
           # macos-latest is arm64; the Apple toolchain cross-compiles the
           # x86_64 slice from it with nothing but the target installed.
           - target: x86_64-apple-darwin

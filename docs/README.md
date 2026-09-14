@@ -14,7 +14,7 @@ repeating it.
 | [`FEATURES.md`](FEATURES.md) | feature-level design choices: why a `.mazet` is two layers, why every field is optional, why the shell hook unexports on the way out, why `exec` prints nothing |
 | [`CONFIG.md`](CONFIG.md) | the configuration reference: both `.mazet` spellings, every key, the precedence tables, every environment variable read and written, the per-platform paths, the registry, and the store-key derivation |
 | [`DEVELOPMENT.md`](DEVELOPMENT.md) | building, the test suite, the lint gates and the pre-commit hooks |
-| [`RELEASING.md`](RELEASING.md) | the release process: what a merge triggers, the five targets, and how the installers consume a release |
+| [`RELEASING.md`](RELEASING.md) | the release process: what a merge triggers, the seven targets, why Linux ships both libcs and which one an installer picks, and how the installers consume a release |
 
 Alongside them, [`CONTRIBUTING.md`](../CONTRIBUTING.md) owns the contribution
 process itself — proposing a change, the commit conventions, and the

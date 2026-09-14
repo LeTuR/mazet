@@ -85,7 +85,7 @@ The branch is deleted on merge.
 and a published GitHub Release with no human action:
 [`release.yml`](.github/workflows/release.yml) asks `cog` whether a version is
 due, tags it, and starts [`cd.yml`](.github/workflows/cd.yml), which
-cross-compiles the five release targets, checksums the archives and publishes
+cross-compiles the seven release targets, checksums the archives and publishes
 the release.
 
 So the pull request title you write is the version you cut — `feat` a minor,
@@ -95,7 +95,7 @@ So the pull request title you write is the version you cut — `feat` a minor,
 To land a change without releasing it, put `[skip release]` in that title.
 
 [`docs/RELEASING.md`](docs/RELEASING.md) has the rest: what triggers what and
-why the tag push alone is not enough, the five targets and their asset names,
+why the tag push alone is not enough, the seven targets and their asset names,
 how to re-run a release whose build failed, and how the installers consume it.
 
 ## What not to put in this crate

@@ -206,9 +206,14 @@ review:
         (bats-core) and tests/install.Tests.ps1 (Pester 5+), each run by its
         own CI job. A change to either should move its suite.
 
-        The five target triples, the archive names and the checksum file are
+        The seven target triples, the archive names and the checksum file are
         .github/workflows/cd.yml's output and are the contract between the two.
         A mismatch is a bug in one side, not licence to change both.
+
+        Linux has two libcs in that list and install.sh picks musl for both
+        architectures, deliberately: a gnu binary only runs on a glibc at least
+        as new as the one it was built against, and a musl one is statically
+        linked and runs anywhere. Do not "simplify" that back to gnu.
 
 # ci.yml sets `cancel-in-progress: true`, so a cancelled check here almost
 # always means a newer push superseded it rather than provider flakiness.
