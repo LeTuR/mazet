@@ -154,6 +154,11 @@ refuses to report success if it does not start, so a floor problem that ever
 returns is reported by the installer in its own words rather than by the
 linker, a shell session later.
 
+One consequence of the switch: on Linux `MAZET_VERSION` cannot pin a release
+cut before the musl archives existed. `v0.1.0` has none, so `install.sh` names
+the missing asset and stops. Take a gnu archive from that release's page by
+hand if you need that exact version.
+
 ## When a release fails
 
 The build failed on something that was not the code — a runner outage, a
@@ -223,6 +228,13 @@ Both resolve the latest release, download the archive for the platform they
 detect, **verify it against `mazet-<tag>-checksums.txt` before unpacking it**,
 and put the binary somewhere on `PATH`, naming the directory and what to add if
 it is not.
+
+`install.sh` reads that checksum file before it downloads anything, because it
+doubles as the release's asset list: a tag that carries no archive for the
+detected target is then refused by name instead of failing like a network
+fault. It also runs the binary once it is in place, and an install whose binary
+does not start is a failed install — see [Why both Linux libcs, and which one
+an installer picks](#why-both-linux-libcs-and-which-one-an-installer-picks).
 
 Both refuse rather than guess. An architecture with no build, a 32-bit Windows,
 a system that is neither Linux nor macOS nor Windows: the message names what
