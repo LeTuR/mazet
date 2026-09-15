@@ -1,0 +1,67 @@
+# How this repository declares its gate to the `publish` skill
+# (https://github.com/LeTuR/publish). The skill reads this file, runs exactly
+# the steps below in the order written, and reports each one in the attestation
+# it writes into the pull request body.
+version: 1
+
+forge: github
+base: main
+
+# The rules the review step is held to, beyond the ones it finds on its own.
+# Each file here owns a class of fact — docs/README.md is the map — and a
+# reviewer who has not read them will raise style preferences this repository
+# does not share and miss the boundaries it does.
+review:
+  rules:
+    - CLAUDE.md
+    - CONTRIBUTING.md
+    - docs/README.md
+    - docs/ARCHITECTURE.md
+    - docs/FEATURES.md
+    - docs/DEVELOPMENT.md
+    - docs/RELEASING.md
+
+# Spelled out rather than left for the agent to detect. A gate step has to be
+# deterministic about what it executes: an unstated step does not mean "run
+# something small", it means the agent decides what running the tests looks
+# like, and two runs of the same gate can then check different things.
+gate:
+  # The Rust lint surface, in the order that fails cheapest first, so a
+  # formatting slip is caught before a clippy build. The rustdoc check is part
+  # of it and not an afterthought: src/lib.rs carries `#![deny(missing_docs)]`
+  # and the crate documents itself in intra-doc links, so a broken one is a CI
+  # failure like any other.
+  - name: lint
+    run: >-
+      cargo fmt --all -- --check
+      && cargo clippy --all-targets --all-features -- -D warnings
+      && RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features
+    # Applied once before the step is re-run, so formatting never reaches
+    # clippy dirty and costs an extra round.
+    fix: cargo fmt --all
+
+  # The suite, named explicitly. `--all-features` so it matches what clippy and
+  # CI compile; the crate is small enough that the build is warm by the time
+  # this runs.
+  - name: test
+    run: cargo test --all-features
+
+  # This repository's own gate, and the last step because it is the widest: it
+  # re-runs the two above against a warm cache and adds what they cannot reach
+  # on their own — `cargo check`, shellcheck over every tracked *.sh, and the
+  # bats installer suite. `--all-files` runs the pre-commit stage only, so the
+  # two cocogitto hooks are not in this step: `cog verify` fires on commit-msg
+  # as each fix is committed, and the history check on pre-push as it is pushed.
+  # docs/DEVELOPMENT.md has the per-hook breakdown.
+  - name: hooks
+    run: prek run --all-files
+
+ci:
+  # .github/workflows/ci.yml runs on every pull request; a publish that did not
+  # see it go green has proved nothing.
+  required: true
+  # The Rust matrix builds on Linux, macOS and Windows, and the two installer
+  # jobs run beside it. ci.yml sets `cancel-in-progress: true`, so a run that
+  # disappears here was almost always superseded by a newer push rather than
+  # lost to provider flakiness — look for the newer run before retrying.
+  timeout: 30m

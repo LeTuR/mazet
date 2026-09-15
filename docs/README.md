@@ -6,7 +6,12 @@ behind it — why each decision was made, and what would break if it were
 reversed.
 
 One document owns each class of fact. Everywhere else points at it rather than
-repeating it.
+repeating it — a fact in two documents drifts, and the pointer is what keeps
+one of them from going stale unnoticed.
+
+These documents describe what **is**. No roadmap, no "will support", no TODO;
+something deliberately absent is said to be absent, with why. And prose is
+prose: a change under `docs/` is not asked for test coverage.
 
 | document | owns |
 |---|---|
@@ -19,6 +24,12 @@ repeating it.
 Alongside them, [`CONTRIBUTING.md`](../CONTRIBUTING.md) owns the contribution
 process itself — proposing a change, the commit conventions, and the
 pull-request rules.
+
+The configuration of external tooling — [`.publish.yaml`](../.publish.yaml),
+[`cog.toml`](../cog.toml), [`renovate.json`](../renovate.json) — is owned by
+that file's own comments and by `CONTRIBUTING.md`, never by
+[`CONFIG.md`](CONFIG.md): that document is about `mazet`'s configuration, not
+the repository's.
 
 There is deliberately no `CONSTITUTION.md`. The two rules this crate treats as
 non-negotiable — no key of any `mazet` file may hold a credential, and a store

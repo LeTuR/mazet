@@ -258,6 +258,29 @@ The knobs, for both:
 The names are prefixed on purpose: a bare `VERSION` left in the caller's
 environment must not be able to steer an installer they piped into a shell.
 
+## How each installer is written
+
+The two are a mirrored pair, and each is fetched and piped straight into a
+shell, so a break here is a break in the one-line install
+[`README.md`](../README.md) documents rather than something a user can work
+around. Three constraints follow from how they are run, and none of them is a
+style preference:
+
+- **`install.sh` is POSIX `sh`, not bash.** It is executed as `curl ... | sh`.
+  Keep it to standard tools (`curl`/`wget`, `tar`, `sha256sum`/`shasum`),
+  non-interactive, cleaning up through its trap, and free of `local` — which is
+  not POSIX and which this repository carries no `.shellcheckrc` to excuse.
+- **`install.ps1` is PowerShell 5.1+ and its source stays ASCII-only.** That is
+  what survives `irm | iex` decoding on Windows PowerShell 5.1.
+- **`Write-Host` in `install.ps1` is intentional and not a lint to fix.**
+  `Write-Output` would leak into the `iex` pipeline.
+
+The seven target triples, the archive names and the checksum file — [What a
+release consists of](#what-a-release-consists-of) has them — are
+[`cd.yml`](../.github/workflows/cd.yml)'s output, and they are the contract
+between the two installers. A mismatch is a bug in one side, not licence to
+change both.
+
 ## The installers' own tests
 
 [`tests/install.bats`](../tests/install.bats) (bats-core) and
